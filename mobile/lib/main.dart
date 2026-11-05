@@ -1,6 +1,12 @@
 import 'package:flutter/material.dart';
+import 'app_context.dart';
+import 'companies_page.dart';
 import 'database_helper.dart';
+import 'lock_page.dart';
 import 'module_hub.dart';
+import 'production_page.dart';
+import 'setup_page.dart';
+import 'utils.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -21,7 +27,60 @@ class MadiniTrackApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: const DashboardScreen(),
+      home: const AppRoot(),
+    );
+  }
+}
+
+/// Inafungua database, inapakia hali ya app, kisha inaamua ukurasa wa kuonyesha.
+class AppRoot extends StatefulWidget {
+  const AppRoot({super.key});
+
+  @override
+  State<AppRoot> createState() => _AppRootState();
+}
+
+class _AppRootState extends State<AppRoot> {
+  late Future<void> _init;
+
+  @override
+  void initState() {
+    super.initState();
+    _init = AppCtx.load();
+  }
+
+  void _reload() {
+    setState(() => _init = AppCtx.load());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<void>(
+      future: _init,
+      builder: (context, snap) {
+        if (snap.connectionState != ConnectionState.done) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        if (snap.hasError) {
+          return Scaffold(
+            body: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(
+                  'Imeshindikana kufungua database:\n${snap.error}',
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
+          );
+        }
+        if (!AppCtx.ready) {
+          return SetupScreen(onDone: _reload);
+        }
+        return const LockGate(child: DashboardScreen());
+      },
     );
   }
 }
@@ -34,215 +93,145 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  final _formKey = GlobalKey<FormState>();
-
-  final _companyController = TextEditingController();
-  final _mineController = TextEditingController();
-  final _shaftController = TextEditingController();
-  final _batchController = TextEditingController();
-  final _bagsController = TextEditingController();
-  final _weightController = TextEditingController();
-  final _gradeController = TextEditingController();
-  final _authorController = TextEditingController();
-
-  String _shiftType = 'Mchana';
-
-  List<Map<String, dynamic>> _records = [];
+  Map<String, dynamic> _stats = {};
+  List<Map<String, dynamic>> _recent = [];
+  String _suggestedBatch = '';
+  int _formKey = 0;
   bool _loading = true;
-  bool _saving = false;
 
   @override
   void initState() {
     super.initState();
-    _loadRecords();
+    _loadAll();
   }
 
-  Future<void> _loadRecords() async {
+  Future<void> _loadAll() async {
     try {
-      final records = await DatabaseHelper.instance.getAllRecords();
+      final db = DatabaseHelper.instance;
+      final stats = await db.dashboardStats();
+      final recent = await db.getProductionRecords(limit: 5);
+      final next = await db.nextBatchId();
 
       if (!mounted) return;
-
       setState(() {
-        _records = records;
+        _stats = stats;
+        _recent = recent;
+        _suggestedBatch = next;
+        _formKey++;
         _loading = false;
       });
     } catch (e) {
       if (!mounted) return;
-
       setState(() => _loading = false);
-      _showMessage('Imeshindikana kusoma database: $e');
+      snack(context, 'Imeshindikana kusoma database: ${errText(e)}');
     }
   }
 
-  void _showMessage(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+  Future<void> _openHub() async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const ModuleHub()),
     );
+    if (!mounted) return;
+    await _loadAll();
   }
 
-  Future<void> _saveRecord() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    setState(() => _saving = true);
-
-    final row = <String, dynamic>{
-      'company_id': _companyController.text.trim(),
-      'mine_id': _mineController.text.trim(),
-      'shaft_area': _shaftController.text.trim(),
-      'batch_id': _batchController.text.trim(),
-      'shift_date': DateTime.now().toIso8601String().split('T')[0],
-      'shift_type': _shiftType,
-      'bags_count': int.parse(_bagsController.text.trim()),
-      'weight_kg': double.parse(_weightController.text.trim()),
-      'estimated_grade': _gradeController.text.trim().isEmpty
-          ? null
-          : double.parse(_gradeController.text.trim()),
-      'recorded_by': _authorController.text.trim(),
-      'sync_status': 'Pending',
-      'created_at': DateTime.now().toIso8601String(),
-    };
-
-    try {
-      await DatabaseHelper.instance.insertProductionRecord(row);
-
-      if (!mounted) return;
-
-      _batchController.clear();
-      _bagsController.clear();
-      _weightController.clear();
-      _gradeController.clear();
-
-      _showMessage('Rekodi imehifadhiwa kwenye simu.');
-
-      await _loadRecords();
-    } catch (e) {
-      if (!mounted) return;
-
-      if (e.toString().contains('UNIQUE constraint failed')) {
-        _showMessage(
-          'Batch ID hii tayari imetumika kwenye kampuni hii.',
-        );
-      } else {
-        _showMessage('Hitilafu wakati wa kuhifadhi: $e');
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _saving = false);
-      }
-    }
-  }
-
-  Widget _field(
-    String label,
-    TextEditingController controller, {
-    TextInputType keyboardType = TextInputType.text,
-    bool required = true,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: TextFormField(
-        controller: controller,
-        keyboardType: keyboardType,
-        decoration: InputDecoration(
-          labelText: label,
-          border: const OutlineInputBorder(),
-        ),
-        validator: (value) {
-          final text = value?.trim() ?? '';
-
-          if (required && text.isEmpty) {
-            return 'Jaza sehemu hii';
-          }
-
-          if (text.isNotEmpty &&
-              keyboardType == TextInputType.number &&
-              int.tryParse(text) == null) {
-            return 'Weka namba kamili';
-          }
-
-          return null;
-        },
-      ),
-    );
-  }
-
-  Widget _decimalField(
-    String label,
-    TextEditingController controller, {
-    bool required = true,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: TextFormField(
-        controller: controller,
-        keyboardType: const TextInputType.numberWithOptions(decimal: true),
-        decoration: InputDecoration(
-          labelText: label,
-          border: const OutlineInputBorder(),
-        ),
-        validator: (value) {
-          final text = value?.trim() ?? '';
-
-          if (required && text.isEmpty) {
-            return 'Jaza sehemu hii';
-          }
-
-          if (text.isNotEmpty) {
-            final number = double.tryParse(text);
-
-            if (number == null || number < 0) {
-              return 'Weka namba sahihi';
-            }
-          }
-
-          return null;
-        },
-      ),
-    );
-  }
-
-  @override
-  void dispose() {
-    _companyController.dispose();
-    _mineController.dispose();
-    _shaftController.dispose();
-    _batchController.dispose();
-    _bagsController.dispose();
-    _weightController.dispose();
-    _gradeController.dispose();
-    _authorController.dispose();
-    super.dispose();
+  Future<void> _switchContext() async {
+    final changed = await showContextSwitcher(context);
+    if (changed) await _loadAll();
   }
 
   @override
   Widget build(BuildContext context) {
-    final pendingCount =
-        _records.where((record) => record['sync_status'] == 'Pending').length;
+    final s = _stats;
+    final lowStock = intv(s['low_stock']);
+    final pending = intv(s['pending']);
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Madini Track Tanzania'),
         actions: [
           IconButton(
+            tooltip: 'Tafuta taarifa',
+            icon: const Icon(Icons.search),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const GlobalSearchPage()),
+            ),
+          ),
+          IconButton(
             tooltip: 'Modules',
             icon: const Icon(Icons.apps),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const ModuleHub(),
-                ),
-              );
-            },
+            onPressed: _openHub,
           ),
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: _loadRecords,
+        onRefresh: _loadAll,
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.business, color: Colors.orange),
+                title: Text(AppCtx.company),
+                subtitle: Text('Mgodi: ${AppCtx.mine}  •  ${AppCtx.user}'),
+                trailing: const Icon(Icons.swap_horiz),
+                onTap: _switchContext,
+              ),
+            ),
+            const SizedBox(height: 8),
+            if (_loading)
+              const Padding(
+                padding: EdgeInsets.all(24),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else ...[
+              GridView.count(
+                crossAxisCount: 2,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                mainAxisSpacing: 8,
+                crossAxisSpacing: 8,
+                childAspectRatio: 2.3,
+                children: [
+                  StatCard(
+                    label: 'Uzalishaji leo',
+                    value: fmtKg(dbl(s['today_kg'])),
+                    icon: Icons.factory_outlined,
+                  ),
+                  StatCard(
+                    label: 'Ore iliyopo (${intv(s['stock_batches'])} Batch)',
+                    value: fmtKg(dbl(s['stock_kg'])),
+                    icon: Icons.inventory_2_outlined,
+                  ),
+                  StatCard(
+                    label: 'Dhahabu haijauzwa',
+                    value: fmtG(dbl(s['gold_balance_g'])),
+                    icon: Icons.diamond_outlined,
+                    color: Colors.amber.shade800,
+                  ),
+                  StatCard(
+                    label: 'Salio la mwezi',
+                    value: fmtMoney(dbl(s['income']) - dbl(s['expense'])),
+                    icon: Icons.account_balance_wallet_outlined,
+                    color: (dbl(s['income']) - dbl(s['expense'])) >= 0
+                        ? Colors.green
+                        : Colors.red,
+                  ),
+                ],
+              ),
+              if (lowStock > 0)
+                Card(
+                  color: Colors.red.shade50,
+                  child: ListTile(
+                    leading: const Icon(Icons.warning_amber, color: Colors.red),
+                    title: Text('Vifaa $lowStock vinakaribia kuisha'),
+                    subtitle: const Text('Fungua Inventory kuona orodha.'),
+                  ),
+                ),
+            ],
+            const SizedBox(height: 12),
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(16),
@@ -253,112 +242,115 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       'Uingizaji wa Uzalishaji',
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'Kila rekodi inatengeneza Batch yake kiotomatiki.',
+                    ),
                     const SizedBox(height: 16),
-                    Form(
-                      key: _formKey,
-                      child: Column(
-                        children: [
-                          _field('Company ID', _companyController),
-                          _field('Mine ID', _mineController),
-                          _field('Shaft / Eneo', _shaftController),
-                          _field('Batch ID', _batchController),
-                          _field(
-                            'Idadi ya magunia',
-                            _bagsController,
-                            keyboardType: TextInputType.number,
-                          ),
-                          _decimalField(
-                            'Uzito (KG)',
-                            _weightController,
-                          ),
-                          _decimalField(
-                            'Estimated Grade (g/t)',
-                            _gradeController,
-                            required: false,
-                          ),
-                          _field('Aliyeingiza rekodi', _authorController),
-                          DropdownButtonFormField<String>(
-                            initialValue: _shiftType,
-                            decoration: const InputDecoration(
-                              labelText: 'Zamu',
-                              border: OutlineInputBorder(),
-                            ),
-                            items: const [
-                              DropdownMenuItem(
-                                value: 'Mchana',
-                                child: Text('Mchana'),
-                              ),
-                              DropdownMenuItem(
-                                value: 'Usiku',
-                                child: Text('Usiku'),
-                              ),
-                            ],
-                            onChanged: (value) {
-                              if (value != null) {
-                                setState(() => _shiftType = value);
-                              }
-                            },
-                          ),
-                          const SizedBox(height: 16),
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton.icon(
-                              onPressed: _saving ? null : _saveRecord,
-                              icon: const Icon(Icons.save),
-                              label: Text(
-                                _saving ? 'Inahifadhi...' : 'Hifadhi Rekodi',
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+                    SpecForm(
+                      key: ValueKey(_formKey),
+                      submitLabel: 'Hifadhi Rekodi',
+                      fields: [
+                        const FSpec('shaft', 'Shaft / Eneo'),
+                        FSpec('batch', 'Batch ID', initial: _suggestedBatch),
+                        const FSpec('bags', 'Idadi ya magunia',
+                            type: FType.integer),
+                        const FSpec('weight', 'Uzito (KG)', type: FType.decimal),
+                        const FSpec('grade', 'Estimated Grade (g/t)',
+                            type: FType.decimal, required: false),
+                        const FSpec(
+                          'shift',
+                          'Zamu',
+                          type: FType.dropdown,
+                          options: [Opt('Mchana', 'Mchana'), Opt('Usiku', 'Usiku')],
+                        ),
+                        const FSpec('date', 'Tarehe', type: FType.date),
+                        FSpec('witness', 'Shahidi (mtu wa pili)',
+                            required: AppCtx.requireWitness),
+                      ],
+                      onSubmit: (v) async {
+                        await DatabaseHelper.instance.recordProduction(
+                          shaft: v['shaft']!,
+                          batchId: v['batch']!,
+                          shiftDate: v['date']!,
+                          shiftType: v['shift']!,
+                          bags: int.parse(v['bags']!),
+                          weightKg: parseNum(v['weight'])!,
+                          grade: parseNum(v['grade']),
+                          witness: v['witness'],
+                        );
+                      },
+                      onSaved: () {
+                        snack(context, 'Rekodi imehifadhiwa kwenye simu.');
+                        _loadAll();
+                      },
                     ),
                   ],
                 ),
               ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
             Card(
               child: ListTile(
-                leading: const Icon(
-                  Icons.cloud_off,
+                leading: Icon(
+                  pending == 0 ? Icons.cloud_done : Icons.cloud_off,
                   color: Colors.orange,
                 ),
                 title: const Text('Rekodi zinazosubiri sync'),
+                subtitle: const Text('Zitatumwa server ikiunganishwa.'),
                 trailing: Text(
-                  '$pendingCount',
+                  '$pending',
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
               ),
             ),
             const SizedBox(height: 12),
-            Text(
-              'Rekodi Zilizohifadhiwa',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            if (_loading)
-              const Center(child: CircularProgressIndicator())
-            else if (_records.isEmpty)
-              const Card(
-                child: Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Text('Bado hakuna rekodi.'),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Rekodi za Karibuni',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
                 ),
-              )
+                TextButton(
+                  onPressed: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const ProductionPage()),
+                    );
+                    if (mounted) _loadAll();
+                  },
+                  child: const Text('Zote'),
+                ),
+              ],
+            ),
+            if (!_loading && _recent.isEmpty)
+              const EmptyCard('Bado hakuna rekodi.')
             else
-              ..._records.map((record) {
+              ..._recent.map((record) {
+                final voided = intv(record['voided']) == 1;
                 return Card(
                   child: ListTile(
                     leading: const Icon(Icons.inventory_2),
-                    title: Text('Batch: ${record['batch_id']}'),
+                    title: Text(
+                      'Batch: ${record['batch_id']}',
+                      style: voided ? VoidedStyle.title : null,
+                    ),
                     subtitle: Text(
-                      'Mgodi: ${record['mine_id']}\n'
-                      'Uzito: ${record['weight_kg']} KG',
+                      'Mgodi: ${record['mine_id']}  •  ${shortDate(record['shift_date'])}\n'
+                      'Uzito: ${fmtKg(dbl(record['weight_kg']))}',
                     ),
                     isThreeLine: true,
-                    trailing: const Text(
-                      'Pending',
-                      style: TextStyle(color: Colors.orange),
+                    trailing: Text(
+                      voided ? 'Imefutwa' : '${record['sync_status']}',
+                      style: TextStyle(
+                        color: voided
+                            ? Colors.red
+                            : (record['sync_status'] == 'Synced'
+                                ? Colors.green
+                                : Colors.orange),
+                      ),
                     ),
                   ),
                 );
@@ -368,4 +360,88 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
     );
   }
+}
+
+
+class GlobalSearchPage extends StatefulWidget {
+  const GlobalSearchPage({super.key});
+
+  @override
+  State<GlobalSearchPage> createState() => _GlobalSearchPageState();
+}
+
+class _GlobalSearchPageState extends State<GlobalSearchPage> {
+  final _controller = TextEditingController();
+  List<Map<String, dynamic>> _results = [];
+  bool _loading = false;
+  String? _error;
+
+  Future<void> _search(String value) async {
+    if (value.trim().isEmpty) {
+      setState(() { _results = []; _error = null; _loading = false; });
+      return;
+    }
+    setState(() { _loading = true; _error = null; });
+    try {
+      final rows = await DatabaseHelper.instance.searchAllRecords(value);
+      if (!mounted) return;
+      setState(() { _results = rows; _loading = false; });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() { _loading = false; _error = errText(e); });
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Tafuta taarifa')),
+    body: Column(children: [
+      Padding(
+        padding: const EdgeInsets.all(16),
+        child: TextField(
+          controller: _controller,
+          autofocus: true,
+          onChanged: _search,
+          decoration: InputDecoration(
+            prefixIcon: const Icon(Icons.search),
+            hintText: 'Batch ID, eneo, mfanyakazi, mnunuzi...',
+            suffixIcon: IconButton(
+              tooltip: 'Futa',
+              onPressed: () { _controller.clear(); _search(''); },
+              icon: const Icon(Icons.clear),
+            ),
+            border: const OutlineInputBorder(),
+          ),
+        ),
+      ),
+      if (_loading) const LinearProgressIndicator(),
+      if (_error != null) Padding(
+        padding: const EdgeInsets.all(16), child: Text(_error!),
+      ),
+      Expanded(
+        child: _results.isEmpty
+          ? Center(child: Text(_controller.text.trim().isEmpty
+              ? 'Andika neno au Batch ID kutafuta.'
+              : 'Hakuna taarifa zilizopatikana.'))
+          : ListView.builder(
+              itemCount: _results.length,
+              itemBuilder: (context, index) {
+                final row = _results[index];
+                return ListTile(
+                  leading: const Icon(Icons.search),
+                  title: Text('${row['title'] ?? ''}'),
+                  subtitle: Text('${row['module'] ?? ''} • ${row['details'] ?? ''}'),
+                  trailing: Text('${row['record_date'] ?? ''}', style: Theme.of(context).textTheme.bodySmall),
+                );
+              },
+            ),
+      ),
+    ]),
+  );
 }

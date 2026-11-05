@@ -1,0 +1,12 @@
+# Flutter SDK and generated build files
+/flutter/
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/build/
+**/.pub-cache/
+**/.pub/
+*.log
+.DS_Store
+flutter/
+*.zip
