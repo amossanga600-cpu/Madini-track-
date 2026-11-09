@@ -1,0 +1,15 @@
+{
+ "trace": {
+  "batch": "SELECT * FROM ore_batches WHERE uuid = ?",
+  "production": "SELECT p.* FROM production_records p JOIN ore_batches b ON b.source_production_uuid = p.uuid WHERE b.uuid = ?",
+  "children": "SELECT * FROM ore_batches WHERE parent_batch_uuid = ? ORDER BY id",
+  "merged_sources": "SELECT b.*, m.weight_kg AS merged_weight_kg FROM batch_movements m JOIN ore_batches target ON target.company_id = m.company_id AND target.batch_id = m.child_batch_id JOIN ore_batches b ON b.company_id = m.company_id AND b.batch_id = m.batch_id WHERE target.uuid = ? AND b.status = 'Imeunganishwa' AND m.notes LIKE 'Imeunganishwa kuwa Batch %' ORDER BY m.id",
+  "movements": "SELECT m.* FROM batch_movements m JOIN ore_batches b ON b.company_id = m.company_id AND b.batch_id = m.batch_id WHERE b.uuid = ? ORDER BY m.id",
+  "processing": "SELECT p.* FROM processing_records p JOIN ore_batches b ON b.company_id = p.company_id AND b.batch_id = p.batch_id WHERE b.uuid = ? AND p.voided = 0 ORDER BY p.id",
+  "lots": "SELECT g.* FROM gold_inventory g JOIN processing_records p ON p.uuid = g.processing_uuid JOIN ore_batches b ON b.company_id = p.company_id AND b.batch_id = p.batch_id WHERE b.uuid = ? AND p.voided = 0 ORDER BY g.id",
+  "sales": "SELECT s.uuid AS sale_uuid, s.sale_date, s.buyer, s.reference, a.grams, a.lot_uuid FROM gold_sale_allocations a JOIN sales s ON s.uuid = a.sale_uuid JOIN gold_inventory g ON g.uuid = a.lot_uuid JOIN processing_records p ON p.uuid = g.processing_uuid JOIN ore_batches b ON b.company_id = p.company_id AND b.batch_id = p.batch_id WHERE b.uuid = ? AND s.voided = 0 ORDER BY s.sale_date, s.id",
+  "sale_sources": "SELECT b.batch_id AS batch_id, b.uuid AS batch_uuid, p.uuid AS processing_uuid, g.uuid AS lot_uuid, a.grams AS grams FROM gold_sale_allocations a JOIN gold_inventory g ON g.uuid = a.lot_uuid JOIN processing_records p ON p.uuid = g.processing_uuid JOIN ore_batches b ON b.company_id = p.company_id AND b.batch_id = p.batch_id WHERE a.sale_uuid = ? ORDER BY a.id",
+  "evidence": "SELECT * FROM attachments WHERE record_uuid = ? AND deleted_at IS NULL ORDER BY id"
+ },
+ "debts_due": "SELECT d.*, IFNULL((SELECT SUM(p.amount) FROM debt_payments p WHERE p.debt_uuid = d.uuid), 0) AS paid FROM debts d WHERE d.company_id = ? AND d.voided = 0 AND d.due_date IS NOT NULL AND d.due_date <> '' AND d.due_date <= ? AND d.amount - IFNULL((SELECT SUM(p.amount) FROM debt_payments p WHERE p.debt_uuid = d.uuid), 0) > 0.005 ORDER BY d.due_date"
+}
