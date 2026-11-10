@@ -3,6 +3,7 @@ import 'app_context.dart';
 import 'database_helper.dart';
 import 'processing_page.dart';
 import 'utils.dart';
+import 'v8_pages.dart';
 
 class BatchTrackingPage extends StatefulWidget {
   const BatchTrackingPage({super.key});
@@ -69,10 +70,11 @@ class _BatchTrackingPageState extends State<BatchTrackingPage> {
       note: 'Uzito uliopo: ${fmtNum(w)} kg. Ukihamisha sehemu tu, Batch mpya '
           'itatengenezwa kwa sehemu hiyo.',
       fields: [
-        FSpec('to', 'Eneo linalopelekwa'),
+        const FSpec('to', 'Eneo linalopelekwa'),
         FSpec('weight', 'Uzito wa kuhamisha (KG)',
             type: FType.decimal, initial: w.toString()),
-        FSpec('witness', 'Shahidi (mtu wa pili)', required: AppCtx.requireWitness),
+        FSpec('witness', 'Shahidi (mtu wa pili)',
+            required: AppCtx.requireWitness),
         const FSpec('notes', 'Maelezo', type: FType.multiline, required: false),
       ],
       onSubmit: (v) async {
@@ -106,8 +108,40 @@ class _BatchTrackingPageState extends State<BatchTrackingPage> {
     }
   }
 
+  Future<void> _merge(Map<String, dynamic> b) async {
+    String? mergedId;
+    final ok = await showSpecSheet(
+      context,
+      title: 'Unganisha Batch ${b['batch_id']}',
+      note:
+          'Batch nyingine lazima iwe na ore iliyobaki na iwe ya kampuni/mgodi huu huu. '
+          'Historia ya kila chanzo itahifadhiwa.',
+      fields: [
+        const FSpec('other', 'Batch nyingine ID'),
+        const FSpec('location', 'Eneo la Batch mpya'),
+        FSpec('witness', 'Shahidi (mtu wa pili)',
+            required: AppCtx.requireWitness),
+        const FSpec('notes', 'Maelezo', type: FType.multiline, required: false),
+      ],
+      onSubmit: (v) async {
+        mergedId = await DatabaseHelper.instance.mergeBatches(
+          batchIds: [b['batch_id'] as String, v['other']!],
+          targetLocation: v['location']!,
+          witness: v['witness'],
+          notes: (v['notes'] ?? '').isEmpty ? null : v['notes'],
+        );
+      },
+    );
+    if (ok) {
+      if (!mounted) return;
+      snack(context, 'Batch mpya imeundwa: $mergedId');
+      await _load();
+    }
+  }
+
   Future<void> _history(Map<String, dynamic> b) async {
-    final rows = await DatabaseHelper.instance.getBatchHistory(b['batch_id'] as String);
+    final rows =
+        await DatabaseHelper.instance.getBatchHistory(b['batch_id'] as String);
     if (!mounted) return;
     await showModalBottomSheet<void>(
       context: context,
@@ -124,6 +158,16 @@ class _BatchTrackingPageState extends State<BatchTrackingPage> {
               padding: const EdgeInsets.only(top: 4),
               child: Text('Imetokana na Batch ${b['parent_batch_id']}'),
             ),
+          OutlinedButton.icon(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                  builder: (_) =>
+                      TraceabilityPage(batchUuid: b['uuid'] as String)),
+            ),
+            icon: const Icon(Icons.account_tree_outlined),
+            label: const Text('Chanzo na historia kamili'),
+          ),
           const SizedBox(height: 12),
           if (rows.isEmpty)
             const Text('Bado haijahamishwa.')
@@ -182,7 +226,8 @@ class _BatchTrackingPageState extends State<BatchTrackingPage> {
             if (_loading)
               const Center(child: CircularProgressIndicator())
             else if (shown.isEmpty)
-              const EmptyCard('Hakuna Batch. Rekodi uzalishaji kwenye Dashboard.')
+              const EmptyCard(
+                  'Hakuna Batch. Rekodi uzalishaji kwenye Dashboard.')
             else
               for (final b in shown)
                 Card(
@@ -190,7 +235,8 @@ class _BatchTrackingPageState extends State<BatchTrackingPage> {
                     leading: const Icon(Icons.qr_code_scanner),
                     title: Text(
                       'Batch ${b['batch_id']}',
-                      style: b['status'] == 'Imefutwa' ? VoidedStyle.title : null,
+                      style:
+                          b['status'] == 'Imefutwa' ? VoidedStyle.title : null,
                     ),
                     subtitle: Text(
                       'Eneo: ${b['current_location']}\n'
@@ -205,6 +251,7 @@ class _BatchTrackingPageState extends State<BatchTrackingPage> {
                             onSelected: (v) {
                               if (v == 'move') _move(b);
                               if (v == 'process') _process(b);
+                              if (v == 'merge') _merge(b);
                               if (v == 'history') _history(b);
                             },
                             itemBuilder: (_) => [
@@ -214,6 +261,10 @@ class _BatchTrackingPageState extends State<BatchTrackingPage> {
                               if (dbl(b['weight_kg']) > 0)
                                 const PopupMenuItem(
                                     value: 'process', child: Text('Chakata')),
+                              if (dbl(b['weight_kg']) > 0)
+                                const PopupMenuItem(
+                                    value: 'merge',
+                                    child: Text('Unganisha Batch')),
                               const PopupMenuItem(
                                   value: 'history', child: Text('Historia')),
                             ],

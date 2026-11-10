@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
+import 'app_context.dart';
 import 'database_helper.dart';
 import 'db_modules.dart';
+import 'db_v8.dart';
+import 'evidence.dart';
+import 'l10n.dart';
 import 'utils.dart';
 
 class FinancePage extends StatefulWidget {
@@ -38,6 +42,10 @@ class _FinancePageState extends State<FinancePage> {
 
   Future<void> _addTx(String type) async {
     final isIncome = type == 'Mapato';
+    final batches = isIncome
+        ? <Map<String, Object?>>[]
+        : await DatabaseHelper.instance.expenseBatchOptions();
+    if (!mounted) return;
     final ok = await showSpecSheet(
       context,
       title: isIncome ? 'Mapato Mapya' : 'Matumizi Mapya',
@@ -49,8 +57,16 @@ class _FinancePageState extends State<FinancePage> {
         const FSpec('date', 'Tarehe', type: FType.date),
         FSpec('method', 'Njia ya malipo',
             type: FType.dropdown, options: optsOf(kPayMethods)),
-        const FSpec('reference', 'Namba ya risiti / rejea',
-            required: false),
+        const FSpec('reference', 'Namba ya risiti / rejea', required: false),
+        if (!isIncome)
+          FSpec('batch', 'Gharama ya Batch (hiari)',
+              type: FType.dropdown,
+              options: [
+                const Opt('none', 'Hakuna (gharama ya jumla)'),
+                for (final b in batches)
+                  Opt(b['uuid'] as String, b['batch_id'] as String),
+              ],
+              initial: 'none'),
         const FSpec('desc', 'Maelezo', type: FType.multiline, required: false),
       ],
       note: isIncome
@@ -64,6 +80,10 @@ class _FinancePageState extends State<FinancePage> {
         description: v['desc']!.isEmpty ? null : v['desc'],
         method: v['method']!,
         reference: v['reference']!.isEmpty ? null : v['reference'],
+        batchUuid:
+            (v['batch'] == null || v['batch'] == 'none' || v['batch']!.isEmpty)
+                ? null
+                : v['batch'],
       ),
     );
     if (ok) {
@@ -73,11 +93,37 @@ class _FinancePageState extends State<FinancePage> {
     }
   }
 
+  Future<void> _approve(Map<String, dynamic> t) async {
+    try {
+      await DatabaseHelper.instance.approveTransaction(t['uuid'] as String);
+      if (!mounted) return;
+      snack(context, 'Matumizi yameidhinishwa.');
+      await _load();
+    } catch (e) {
+      if (mounted) snack(context, errText(e));
+    }
+  }
+
+  Future<void> _reject(Map<String, dynamic> t) async {
+    final reason = await askReason(context, 'Kataa matumizi haya?');
+    if (reason == null) return;
+    try {
+      await DatabaseHelper.instance
+          .rejectTransaction(t['uuid'] as String, reason);
+      if (!mounted) return;
+      snack(context, 'Matumizi yamekataliwa (yanabaki kwenye historia).');
+      await _load();
+    } catch (e) {
+      if (mounted) snack(context, errText(e));
+    }
+  }
+
   Future<void> _voidTx(Map<String, dynamic> t) async {
     final reason = await askReason(context, 'Futa muamala huu?');
     if (reason == null) return;
     try {
-      await DatabaseHelper.instance.voidTransaction(t['uuid'] as String, reason);
+      await DatabaseHelper.instance
+          .voidTransaction(t['uuid'] as String, reason);
       if (!mounted) return;
       snack(context, 'Muamala umefutwa (unabaki kwenye historia).');
       await _load();
@@ -102,7 +148,8 @@ class _FinancePageState extends State<FinancePage> {
         ),
         const FSpec('party', 'Jina la mhusika'),
         const FSpec('amount', 'Kiasi (TSh)', type: FType.decimal),
-        const FSpec('due', 'Tarehe ya mwisho', type: FType.date, required: false),
+        const FSpec('due', 'Tarehe ya mwisho',
+            type: FType.date, required: false),
         const FSpec('desc', 'Maelezo', type: FType.multiline, required: false),
       ],
       onSubmit: (v) => DatabaseHelper.instance.addDebt(
@@ -246,17 +293,37 @@ class _FinancePageState extends State<FinancePage> {
                     '${shortDate(t['trans_date'])} • ${t['method'] ?? ''}'
                     '${t['source'] == 'Mkono' ? '' : ' • Kutoka ${t['source']}'}'
                     '${(t['description'] ?? '').toString().isEmpty ? '' : '\n${t['description']}'}'
+                    '${t['approval_status'] == 'Inasubiri' ? '\n⏳ ${tr('Inasubiri idhini')}' : ''}'
                     '${intv(t['voided']) == 1 ? '\nImefutwa: ${t['void_reason']}' : ''}',
                   ),
                   isThreeLine: (t['description'] ?? '').toString().isNotEmpty ||
-                      intv(t['voided']) == 1,
-                  trailing: (intv(t['voided']) == 1 || t['source'] != 'Mkono')
+                      intv(t['voided']) == 1 ||
+                      t['approval_status'] == 'Inasubiri',
+                  trailing: intv(t['voided']) == 1
                       ? null
                       : PopupMenuButton<String>(
-                          onSelected: (_) => _voidTx(t),
-                          itemBuilder: (_) => const [
+                          onSelected: (v) {
+                            if (v == 'v') _voidTx(t);
+                            if (v == 'a') _approve(t);
+                            if (v == 'r') _reject(t);
+                            if (v == 'e') {
+                              showAttachSheet(context, 'finance_transactions',
+                                  t['uuid'] as String);
+                            }
+                          },
+                          itemBuilder: (_) => [
+                            if (t['approval_status'] == 'Inasubiri' &&
+                                AppCtx.canApprove) ...[
+                              PopupMenuItem(
+                                  value: 'a', child: Text(tr('Idhinisha'))),
+                              PopupMenuItem(
+                                  value: 'r', child: Text(tr('Kataa'))),
+                            ],
                             PopupMenuItem(
-                                value: 'v', child: Text('Futa kwa sababu')),
+                                value: 'e', child: Text(tr('Ushahidi'))),
+                            if (t['source'] == 'Mkono')
+                              const PopupMenuItem(
+                                  value: 'v', child: Text('Futa kwa sababu')),
                           ],
                         ),
                 ),
@@ -313,7 +380,8 @@ class _FinancePageState extends State<FinancePage> {
             for (final d in _debts)
               Card(
                 child: ListTile(
-                  title: Text('${d['party']}  •  ${fmtMoney(dbl(d['amount']))}'),
+                  title:
+                      Text('${d['party']}  •  ${fmtMoney(dbl(d['amount']))}'),
                   subtitle: Text(
                     '${d['direction'] == 'Tunadaiwa' ? 'Sisi tunadaiwa' : 'Tunadai'}\n'
                     'Imelipwa ${fmtMoney(dbl(d['paid']))} • '

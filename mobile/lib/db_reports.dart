@@ -7,7 +7,8 @@ import 'utils.dart';
 
 extension ReportsDb on DatabaseHelper {
   /// Mizania ya kila Batch: iliyochimbwa = iliyobaki + iliyochakatwa + iliyogawanywa.
-  Future<List<Map<String, dynamic>>> batchBalances({bool allMines = false}) async {
+  Future<List<Map<String, dynamic>>> batchBalances(
+      {bool allMines = false}) async {
     final db = await database;
     final rows = await db.rawQuery(
       'SELECT b.batch_id, b.status, b.current_location, b.initial_weight_kg, '
@@ -97,7 +98,8 @@ extension ReportsDb on DatabaseHelper {
 
     final items = await getItems();
     final low = items
-        .where((i) => dbl(i['min_level']) > 0 && dbl(i['stock']) <= dbl(i['min_level']))
+        .where((i) =>
+            dbl(i['min_level']) > 0 && dbl(i['stock']) <= dbl(i['min_level']))
         .toList();
 
     return {
@@ -157,7 +159,8 @@ extension ReportsDb on DatabaseHelper {
           '${fmtMoney(dbl(row['t']))}');
     }
     b.writeln('');
-    b.writeln('MISHAHARA: ${intv(pay['n'])} malipo, ${fmtMoney(dbl(pay['net']))}');
+    b.writeln(
+        'MISHAHARA: ${intv(pay['n'])} malipo, ${fmtMoney(dbl(pay['net']))}');
     b.writeln('');
     b.writeln('DHAHABU ILIYOPO (haijauzwa): ${fmtG(dbl(r['gold_balance']))}');
 
@@ -170,7 +173,8 @@ extension ReportsDb on DatabaseHelper {
       }
     }
 
-    final mism = (r['batches'] as List).where((x) => x['mismatch'] == true).toList();
+    final mism =
+        (r['batches'] as List).where((x) => x['mismatch'] == true).toList();
     if (mism.isNotEmpty) {
       b.writeln('');
       b.writeln('TAHADHARI: BATCH ZENYE TOFAUTI YA UZITO');
@@ -184,50 +188,114 @@ extension ReportsDb on DatabaseHelper {
   // -------------------------------------------------------------------------
   // CSV
   // -------------------------------------------------------------------------
-  Future<String> exportCsv(String kind, {String? from, String? to, bool allMines = false}) async {
+  Future<String> exportCsv(String kind,
+      {String? from, String? to, bool allMines = false}) async {
     switch (kind) {
       case 'Uzalishaji':
-        final rows = await getProductionRecords(from: from, to: to, allMines: allMines);
+        final rows =
+            await getProductionRecords(from: from, to: to, allMines: allMines);
         return toCsv(rows, [
-          'shift_date', 'mine_id', 'shaft_area', 'batch_id', 'shift_type',
-          'bags_count', 'weight_kg', 'estimated_grade', 'recorded_by',
-          'witness', 'voided', 'void_reason', 'uuid',
+          'shift_date',
+          'mine_id',
+          'shaft_area',
+          'batch_id',
+          'shift_type',
+          'bags_count',
+          'weight_kg',
+          'estimated_grade',
+          'recorded_by',
+          'witness',
+          'voided',
+          'void_reason',
+          'uuid',
         ]);
       case 'Uchakataji':
-        final rows = await getProcessingRecords(from: from, to: to, allMines: allMines);
+        final rows =
+            await getProcessingRecords(from: from, to: to, allMines: allMines);
         return toCsv(rows, [
-          'processing_date', 'mine_id', 'batch_id', 'ore_processed_kg',
-          'gold_recovered_g', 'tailings_kg', 'purity_percent', 'method',
-          'mercury_g', 'processing_cost', 'processed_by', 'witness',
-          'voided', 'void_reason', 'uuid',
+          'processing_date',
+          'mine_id',
+          'batch_id',
+          'ore_processed_kg',
+          'gold_recovered_g',
+          'tailings_kg',
+          'purity_percent',
+          'method',
+          'mercury_g',
+          'processing_cost',
+          'processed_by',
+          'witness',
+          'voided',
+          'void_reason',
+          'uuid',
         ]);
       case 'Fedha':
-        final rows = await getTransactions(from: from, to: to, allMines: allMines);
+        final rows =
+            await getTransactions(from: from, to: to, allMines: allMines);
         return toCsv(rows, [
-          'trans_date', 'mine_id', 'type', 'category', 'amount', 'method',
-          'reference', 'description', 'source', 'created_by', 'voided',
-          'void_reason', 'uuid',
+          'trans_date',
+          'mine_id',
+          'type',
+          'category',
+          'amount',
+          'method',
+          'reference',
+          'description',
+          'source',
+          'created_by',
+          'voided',
+          'void_reason',
+          'uuid',
         ]);
       case 'Mauzo':
         final rows = await getSales(from: from, to: to, allMines: allMines);
         return toCsv(rows, [
-          'sale_date', 'mine_id', 'buyer', 'buyer_license', 'gold_weight_g',
-          'purity_percent', 'price_per_g', 'gross_amount', 'royalty_amount',
-          'inspection_amount', 'other_fees', 'net_amount', 'payment_method',
-          'reference', 'witness', 'created_by', 'voided', 'uuid',
+          'sale_date',
+          'mine_id',
+          'buyer',
+          'buyer_license',
+          'gold_weight_g',
+          'purity_percent',
+          'price_per_g',
+          'gross_amount',
+          'royalty_amount',
+          'inspection_amount',
+          'other_fees',
+          'net_amount',
+          'payment_method',
+          'reference',
+          'witness',
+          'created_by',
+          'voided',
+          'uuid',
         ]);
       case 'Mishahara':
         final rows = await getPayments(from: from, to: to, allMines: allMines);
         return toCsv(rows, [
-          'paid_date', 'full_name', 'period_from', 'period_to',
-          'days_present', 'gross', 'deductions', 'net', 'method',
-          'paid_by', 'voided', 'uuid',
+          'paid_date',
+          'full_name',
+          'period_from',
+          'period_to',
+          'days_present',
+          'gross',
+          'deductions',
+          'net',
+          'method',
+          'paid_by',
+          'voided',
+          'uuid',
         ]);
       case 'Batch':
         final rows = await batchBalances(allMines: allMines);
         return toCsv(rows, [
-          'batch_id', 'status', 'current_location', 'initial_weight_kg',
-          'processed', 'split_out', 'weight_kg', 'diff',
+          'batch_id',
+          'status',
+          'current_location',
+          'initial_weight_kg',
+          'processed',
+          'split_out',
+          'weight_kg',
+          'diff',
         ]);
     }
     return '';
@@ -251,9 +319,9 @@ extension ReportsDb on DatabaseHelper {
     final db = await database;
     final out = <String, int>{};
     for (final t in kSyncTables) {
-      out[t] = Sqflite.firstIntValue(
-              await db.rawQuery('SELECT COUNT(*) FROM $t')) ??
-          0;
+      out[t] =
+          Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM $t')) ??
+              0;
     }
     return out;
   }
@@ -295,9 +363,13 @@ extension ReportsDb on DatabaseHelper {
     if (decoded is! Map || decoded['app'] != 'madini_track') {
       throw AppError('Maandishi si backup ya Madini Track.');
     }
-    if (decoded['db_version'] != kDbVersion) {
+    // Schema ni additive tangu v7; safu mpya hutumia defaults za database.
+    final backupVersion = decoded['db_version'];
+    if (backupVersion is! int ||
+        backupVersion < 7 ||
+        backupVersion > kDbVersion) {
       throw AppError(
-        'Backup hii ni ya toleo tofauti la database (${decoded['db_version']}).',
+        'Backup hii ni ya toleo tofauti la database ($backupVersion).',
       );
     }
     final tables = decoded['tables'];
@@ -317,6 +389,8 @@ extension ReportsDb on DatabaseHelper {
           await txn.delete(t);
         }
       }
+      // Events za zamani za outbox hazihusiani tena na data iliyorejeshwa.
+      await txn.delete('sync_outbox');
       for (final t in kBackupTables) {
         final rows = (tables[t] as List?) ?? const [];
         for (final row in rows) {

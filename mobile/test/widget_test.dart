@@ -52,7 +52,10 @@ void main() {
   test('CSV inalinda koma na nukuu', () {
     final csv = toCsv([
       {'a': 'x,y', 'b': 'she said "hi"'}
-    ], ['a', 'b']);
+    ], [
+      'a',
+      'b'
+    ]);
     expect(csv, 'a,b\n"x,y","she said ""hi"""\n');
   });
 }

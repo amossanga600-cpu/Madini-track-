@@ -1,10 +1,15 @@
+import 'dart:io';
+
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 import 'app_context.dart';
+import 'migration_v8_sql.dart';
+import 'migration_v9_sql.dart';
+import 'migration_v10_sql.dart';
 import 'utils.dart';
 
-/// Toleo la database v7: moduli za shughuli + metadata ya sync + gold FIFO.
-const int kDbVersion = 7;
+/// Toleo la database v10: v9 + mass balance inayofuatilia transfers za merge.
+const int kDbVersion = 10;
 
 /// Majedwali yote yanayoingia kwenye Backup / Restore.
 const List<String> kBackupTables = [
@@ -27,6 +32,10 @@ const List<String> kBackupTables = [
   'audit_log',
   'gold_inventory',
   'gold_sale_allocations',
+  'attachments',
+  'tax_rates',
+  'safety_incidents',
+  'local_users',
 ];
 
 /// Majedwali yenye `sync_status` (yatakayotumwa kwenye backend).
@@ -49,6 +58,9 @@ const List<String> kSyncTables = [
   'audit_log',
   'gold_inventory',
   'gold_sale_allocations',
+  'attachments',
+  'tax_rates',
+  'safety_incidents',
 ];
 
 // ---------------------------------------------------------------------------
@@ -105,11 +117,14 @@ Future<void> writeAudit(
   await ex.insert('audit_log', {
     ...meta(),
     'company_id': company ?? AppCtx.company,
+    'mine_id':
+        (company == null || company == AppCtx.company) ? AppCtx.mine : null,
     'entity': entity,
     'entity_uuid': entityUuid,
     'action': action,
     'detail': detail,
     'user_name': AppCtx.user,
+    'actor_uuid': AppCtx.userUuid.isEmpty ? null : AppCtx.userUuid,
   });
 }
 
@@ -126,6 +141,8 @@ void checkWitness(String? witness) {
 
 Future<void> insertFinanceTxn(
   DatabaseExecutor ex, {
+  String? batchUuid,
+  String approvalStatus = 'Imeidhinishwa',
   required String type,
   required String category,
   required double amount,
@@ -151,6 +168,8 @@ Future<void> insertFinanceTxn(
     'source_uuid': sourceUuid,
     'created_by': AppCtx.user,
     'voided': 0,
+    'batch_uuid': batchUuid,
+    'approval_status': approvalStatus,
   });
 }
 
@@ -207,12 +226,37 @@ class DatabaseHelper {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, 'madini_local.db');
 
+    await _backupBeforeUpgrade(path);
+
     return openDatabase(
       path,
       version: kDbVersion,
+      onConfigure: (db) async {
+        // Lazima iwashwe kwa kila connection; SQLite huizima kwa chaguo-msingi.
+        await db.execute('PRAGMA foreign_keys = ON');
+      },
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
+  }
+
+  /// Mkakati wa recovery: kabla ya upgrade, nakili faili la database la toleo
+  /// la zamani kando yake (`madini_local.db.pre-v8.bak`). Ikiwa migration
+  /// itashindwa sqflite hurudisha transaction, na nakala hii inabaki kama kinga.
+  Future<void> _backupBeforeUpgrade(String path) async {
+    try {
+      final f = File(path);
+      if (!await f.exists()) return;
+      final probe = await openReadOnlyDatabase(path);
+      final v = await probe.getVersion();
+      await probe.close();
+      if (v > 0 && v < kDbVersion) {
+        final bak = File('$path.pre-v$kDbVersion.bak');
+        if (!await bak.exists()) await f.copy(bak.path);
+      }
+    } catch (_) {
+      // Nakala ya kinga isiizuie app kufunguka; tatizo halisi litaonekana kwenye open.
+    }
   }
 
   Future<void> _createDB(Database db, int version) async {
@@ -221,6 +265,9 @@ class DatabaseHelper {
     await _createProcessingTable(db);
     await _migrateToV5(db);
     await _migrateToV7(db);
+    await _migrateToV8(db);
+    await _migrateToV9(db);
+    await _migrateToV10(db);
   }
 
   Future<void> _createProductionTable(Database db) async {
@@ -374,6 +421,37 @@ class DatabaseHelper {
     if (oldVersion < 7) {
       await _migrateToV7(db);
     }
+    if (oldVersion < 8) {
+      await _migrateToV8(db);
+    }
+    if (oldVersion < 9) {
+      await _migrateToV9(db);
+    }
+    if (oldVersion < 10) {
+      await _migrateToV10(db);
+    }
+  }
+
+  /// Schema v8. Inaendeshwa ndani ya transaction ya sqflite (onCreate/onUpgrade),
+  /// kwa hiyo ikishindwa hakuna badiliko linalobaki. SQL kamili: kV8Statements.
+  Future<void> _migrateToV8(Database db) async {
+    for (final s in kV8Statements) {
+      await db.execute(s);
+    }
+  }
+
+  /// Schema v9: huongeza metadata ya algorithm ya PIN bila kubadili hash za zamani.
+  Future<void> _migrateToV9(Database db) async {
+    for (final s in kV9Statements) {
+      await db.execute(s);
+    }
+  }
+
+  /// Schema v10: ledger ya uzito wa Batch inajumuisha transfers za merge.
+  Future<void> _migrateToV10(Database db) async {
+    for (final s in kV10Statements) {
+      await db.execute(s);
+    }
   }
 
   /// Schema v7: huongeza metadata ya sync na ufuatiliaji wa dhahabu FIFO.
@@ -383,89 +461,143 @@ class DatabaseHelper {
     final txn = db;
     await txn.execute('''CREATE TABLE IF NOT EXISTS app_metadata (
         key TEXT PRIMARY KEY, value TEXT NOT NULL)''');
-      var deviceRows = await txn.query('app_metadata', where: 'key = ?', whereArgs: ['device_id'], limit: 1);
-      if (deviceRows.isEmpty) {
-        await txn.insert('app_metadata', {'key': 'device_id', 'value': newUuid()});
-        deviceRows = await txn.query('app_metadata', where: 'key = ?', whereArgs: ['device_id'], limit: 1);
-      }
-      final deviceId = deviceRows.first['value'] as String;
+    var deviceRows = await txn.query('app_metadata',
+        where: 'key = ?', whereArgs: ['device_id'], limit: 1);
+    if (deviceRows.isEmpty) {
+      await txn
+          .insert('app_metadata', {'key': 'device_id', 'value': newUuid()});
+      deviceRows = await txn.query('app_metadata',
+          where: 'key = ?', whereArgs: ['device_id'], limit: 1);
+    }
+    final deviceId = deviceRows.first['value'] as String;
 
-      const syncTables = [
-        'companies','mines','production_records','ore_batches','batch_movements',
-        'processing_records','workers','attendance','payroll_payments',
-        'finance_transactions','debts','debt_payments','inventory_items',
-        'inventory_movements','sales','audit_log','gold_inventory','gold_sale_allocations'
-      ];
-      final tableRows = await txn.rawQuery("SELECT name FROM sqlite_master WHERE type='table'");
-      final existingTables = tableRows.map((r) => r['name'] as String).toSet();
-      for (final table in syncTables) {
-        if (!existingTables.contains(table)) continue;
-        final info = await txn.rawQuery('PRAGMA table_info($table)');
-        final columns = info.map((r) => r['name'] as String).toSet();
-        final additions = <String, String>{
-          'updated_at': 'TEXT',
-          'device_id': 'TEXT',
-          'version': 'INTEGER NOT NULL DEFAULT 1',
-          'deleted_at': 'TEXT',
-        };
-        for (final entry in additions.entries) {
-          if (!columns.contains(entry.key)) {
-            await txn.execute('ALTER TABLE $table ADD COLUMN ${entry.key} ${entry.value}');
-          }
-        }
-        // Backfill metadata kwa rekodi za zamani bila kubadilisha UUID zao.
-        final rows = await txn.query(table);
-        for (final row in rows) {
-          final id = row['id'];
-          if (id == null) continue;
-          final updates = <String, Object?>{};
-          if (row['updated_at'] == null || row['updated_at'] == '') {
-            updates['updated_at'] = row['created_at'] ?? row['sale_date'] ?? row['processing_date'] ?? row['shift_date'] ?? nowIso();
-          }
-          if (row['device_id'] == null || row['device_id'] == '') updates['device_id'] = deviceId;
-          if (row['version'] == null) updates['version'] = 1;
-          if (row['deleted_at'] == null && row.containsKey('voided') && intv(row['voided']) == 1) {
-            updates['deleted_at'] = row['updated_at'] ?? nowIso();
-          }
-          if (updates.isNotEmpty) await txn.update(table, updates, where: 'id = ?', whereArgs: [id]);
-        }
-      }
-
-      // Metadata za Batch: hifadhi uzito wa awali na uhusiano wa chanzo kwa UUID.
-      final batchInfo = await txn.rawQuery('PRAGMA table_info(ore_batches)');
-      final batchCols = batchInfo.map((r) => r['name'] as String).toSet();
-      const batchAdds = {
-        'weight_initial_kg': 'REAL NOT NULL DEFAULT 0',
-        'parent_batch_uuid': 'TEXT',
-        'source_production_uuid': 'TEXT',
+    const syncTables = [
+      'companies',
+      'mines',
+      'production_records',
+      'ore_batches',
+      'batch_movements',
+      'processing_records',
+      'workers',
+      'attendance',
+      'payroll_payments',
+      'finance_transactions',
+      'debts',
+      'debt_payments',
+      'inventory_items',
+      'inventory_movements',
+      'sales',
+      'audit_log',
+      'gold_inventory',
+      'gold_sale_allocations'
+    ];
+    final tableRows =
+        await txn.rawQuery("SELECT name FROM sqlite_master WHERE type='table'");
+    final existingTables = tableRows.map((r) => r['name'] as String).toSet();
+    for (final table in syncTables) {
+      if (!existingTables.contains(table)) continue;
+      final info = await txn.rawQuery('PRAGMA table_info($table)');
+      final columns = info.map((r) => r['name'] as String).toSet();
+      final additions = <String, String>{
+        'updated_at': 'TEXT',
+        'device_id': 'TEXT',
+        'version': 'INTEGER NOT NULL DEFAULT 1',
+        'deleted_at': 'TEXT',
       };
-      for (final e in batchAdds.entries) {
-        if (!batchCols.contains(e.key)) await txn.execute('ALTER TABLE ore_batches ADD COLUMN ${e.key} ${e.value}');
+      for (final entry in additions.entries) {
+        if (!columns.contains(entry.key)) {
+          await txn.execute(
+              'ALTER TABLE $table ADD COLUMN ${entry.key} ${entry.value}');
+        }
       }
-      final movementInfo = await txn.rawQuery('PRAGMA table_info(batch_movements)');
-      final movementCols = movementInfo.map((r) => r['name'] as String).toSet();
-      if (!movementCols.contains('child_batch_id')) await txn.execute('ALTER TABLE batch_movements ADD COLUMN child_batch_id TEXT');
+      // Backfill metadata kwa rekodi za zamani bila kubadilisha UUID zao.
+      final rows = await txn.query(table);
+      for (final row in rows) {
+        final id = row['id'];
+        if (id == null) continue;
+        final updates = <String, Object?>{};
+        if (row['updated_at'] == null || row['updated_at'] == '') {
+          updates['updated_at'] = row['created_at'] ??
+              row['sale_date'] ??
+              row['processing_date'] ??
+              row['shift_date'] ??
+              nowIso();
+        }
+        if (row['device_id'] == null || row['device_id'] == '') {
+          updates['device_id'] = deviceId;
+        }
+        if (row['version'] == null) updates['version'] = 1;
+        if (row['deleted_at'] == null &&
+            row.containsKey('voided') &&
+            intv(row['voided']) == 1) {
+          updates['deleted_at'] = row['updated_at'] ?? nowIso();
+        }
+        if (updates.isNotEmpty) {
+          await txn.update(table, updates, where: 'id = ?', whereArgs: [id]);
+        }
+      }
+    }
 
-      await txn.execute('''UPDATE ore_batches SET
+    // Metadata za Batch: hifadhi uzito wa awali na uhusiano wa chanzo kwa UUID.
+    final batchInfo = await txn.rawQuery('PRAGMA table_info(ore_batches)');
+    final batchCols = batchInfo.map((r) => r['name'] as String).toSet();
+    const batchAdds = {
+      'weight_initial_kg': 'REAL NOT NULL DEFAULT 0',
+      'parent_batch_uuid': 'TEXT',
+      'source_production_uuid': 'TEXT',
+    };
+    for (final e in batchAdds.entries) {
+      if (!batchCols.contains(e.key)) {
+        await txn
+            .execute('ALTER TABLE ore_batches ADD COLUMN ${e.key} ${e.value}');
+      }
+    }
+    final movementInfo =
+        await txn.rawQuery('PRAGMA table_info(batch_movements)');
+    final movementCols = movementInfo.map((r) => r['name'] as String).toSet();
+    if (!movementCols.contains('child_batch_id')) {
+      await txn.execute(
+          'ALTER TABLE batch_movements ADD COLUMN child_batch_id TEXT');
+    }
+
+    await txn.execute('''UPDATE ore_batches SET
         weight_initial_kg = CASE WHEN weight_initial_kg = 0 THEN IFNULL(initial_weight_kg, weight_kg) ELSE weight_initial_kg END
         WHERE weight_initial_kg = 0''');
-      final batches = await txn.query('ore_batches');
-      for (final b in batches) {
-        final company = b['company_id'];
-        final bid = b['batch_id'];
-        final parentId = b['parent_batch_id'];
-        if (parentId != null && (b['parent_batch_uuid'] == null || b['parent_batch_uuid'] == '')) {
-          final parents = await txn.query('ore_batches', columns: ['uuid'], where: 'company_id = ? AND batch_id = ?', whereArgs: [company, parentId], limit: 1);
-          if (parents.isNotEmpty) await txn.update('ore_batches', {'parent_batch_uuid': parents.first['uuid']}, where: 'id = ?', whereArgs: [b['id']]);
-        }
-        if (b['source_production_uuid'] == null || b['source_production_uuid'] == '') {
-          final source = await txn.query('production_records', columns: ['uuid'], where: 'company_id = ? AND batch_id = ?', whereArgs: [company, bid], limit: 1);
-          if (source.isNotEmpty) await txn.update('ore_batches', {'source_production_uuid': source.first['uuid']}, where: 'id = ?', whereArgs: [b['id']]);
+    final batches = await txn.query('ore_batches');
+    for (final b in batches) {
+      final company = b['company_id'];
+      final bid = b['batch_id'];
+      final parentId = b['parent_batch_id'];
+      if (parentId != null &&
+          (b['parent_batch_uuid'] == null || b['parent_batch_uuid'] == '')) {
+        final parents = await txn.query('ore_batches',
+            columns: ['uuid'],
+            where: 'company_id = ? AND batch_id = ?',
+            whereArgs: [company, parentId],
+            limit: 1);
+        if (parents.isNotEmpty) {
+          await txn.update(
+              'ore_batches', {'parent_batch_uuid': parents.first['uuid']},
+              where: 'id = ?', whereArgs: [b['id']]);
         }
       }
+      if (b['source_production_uuid'] == null ||
+          b['source_production_uuid'] == '') {
+        final source = await txn.query('production_records',
+            columns: ['uuid'],
+            where: 'company_id = ? AND batch_id = ?',
+            whereArgs: [company, bid],
+            limit: 1);
+        if (source.isNotEmpty) {
+          await txn.update(
+              'ore_batches', {'source_production_uuid': source.first['uuid']},
+              where: 'id = ?', whereArgs: [b['id']]);
+        }
+      }
+    }
 
-      // Inventory ya dhahabu na allocations za mauzo (FIFO).
-      await txn.execute('''CREATE TABLE IF NOT EXISTS gold_inventory (
+    // Inventory ya dhahabu na allocations za mauzo (FIFO).
+    await txn.execute('''CREATE TABLE IF NOT EXISTS gold_inventory (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         uuid TEXT NOT NULL UNIQUE,
         company_id TEXT NOT NULL,
@@ -482,7 +614,7 @@ class DatabaseHelper {
         deleted_at TEXT,
         sync_status TEXT NOT NULL DEFAULT 'Pending'
       )''');
-      await txn.execute('''CREATE TABLE IF NOT EXISTS gold_sale_allocations (
+    await txn.execute('''CREATE TABLE IF NOT EXISTS gold_sale_allocations (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         uuid TEXT NOT NULL UNIQUE,
         sale_uuid TEXT NOT NULL,
@@ -495,57 +627,108 @@ class DatabaseHelper {
         deleted_at TEXT,
         sync_status TEXT NOT NULL DEFAULT 'Pending'
       )''');
-      await txn.execute('CREATE INDEX IF NOT EXISTS idx_gold_lot_fifo ON gold_inventory(company_id, mine_id, created_at, id)');
-      await txn.execute('CREATE INDEX IF NOT EXISTS idx_gold_alloc_sale ON gold_sale_allocations(sale_uuid)');
-      await txn.execute('CREATE INDEX IF NOT EXISTS idx_gold_alloc_lot ON gold_sale_allocations(lot_uuid)');
-      existingTables.add('gold_inventory');
-      existingTables.add('gold_sale_allocations');
+    await txn.execute(
+        'CREATE INDEX IF NOT EXISTS idx_gold_lot_fifo ON gold_inventory(company_id, mine_id, created_at, id)');
+    await txn.execute(
+        'CREATE INDEX IF NOT EXISTS idx_gold_alloc_sale ON gold_sale_allocations(sale_uuid)');
+    await txn.execute(
+        'CREATE INDEX IF NOT EXISTS idx_gold_alloc_lot ON gold_sale_allocations(lot_uuid)');
+    existingTables.add('gold_inventory');
+    existingTables.add('gold_sale_allocations');
 
-      // Backfill lot moja kwa kila uchakataji wa zamani, kisha tenga mauzo ya zamani FIFO.
-      final lotCount = Sqflite.firstIntValue(await txn.rawQuery('SELECT COUNT(*) FROM gold_inventory')) ?? 0;
-      if (lotCount == 0) {
-        final processing = await txn.query('processing_records', where: 'voided = 0 AND gold_recovered_g > 0', orderBy: 'processing_date ASC, id ASC');
-        for (final p in processing) {
-          final grams = dbl(p['gold_recovered_g']);
-          final lotUuid = newUuid();
-          await txn.insert('gold_inventory', {
-            'uuid': lotUuid, 'company_id': p['company_id'], 'mine_id': p['mine_id'],
-            'processing_uuid': p['uuid'], 'batch_id': p['batch_id'],
-            'grams_initial': grams, 'grams_available': grams,
-            'purity_percent': p['purity_percent'], 'created_at': p['created_at'] ?? p['processing_date'],
-            'updated_at': nowIso(), 'device_id': deviceId, 'version': 1, 'sync_status': 'Pending'
+    // Backfill lot moja kwa kila uchakataji wa zamani, kisha tenga mauzo ya zamani FIFO.
+    final lotCount = Sqflite.firstIntValue(
+            await txn.rawQuery('SELECT COUNT(*) FROM gold_inventory')) ??
+        0;
+    if (lotCount == 0) {
+      final processing = await txn.query('processing_records',
+          where: 'voided = 0 AND gold_recovered_g > 0',
+          orderBy: 'processing_date ASC, id ASC');
+      for (final p in processing) {
+        final grams = dbl(p['gold_recovered_g']);
+        final lotUuid = newUuid();
+        await txn.insert('gold_inventory', {
+          'uuid': lotUuid,
+          'company_id': p['company_id'],
+          'mine_id': p['mine_id'],
+          'processing_uuid': p['uuid'],
+          'batch_id': p['batch_id'],
+          'grams_initial': grams,
+          'grams_available': grams,
+          'purity_percent': p['purity_percent'],
+          'created_at': p['created_at'] ?? p['processing_date'],
+          'updated_at': nowIso(),
+          'device_id': deviceId,
+          'version': 1,
+          'sync_status': 'Pending'
+        });
+      }
+      final sales = await txn.query('sales',
+          where: 'voided = 0 AND gold_weight_g > 0',
+          orderBy: 'sale_date ASC, id ASC');
+      for (final sale in sales) {
+        var remaining = dbl(sale['gold_weight_g']);
+        final lots = await txn.query('gold_inventory',
+            where:
+                'company_id = ? AND mine_id = ? AND grams_available > 0 AND deleted_at IS NULL',
+            whereArgs: [sale['company_id'], sale['mine_id']],
+            orderBy: 'created_at ASC, id ASC');
+        for (final lot in lots) {
+          if (remaining <= 0.000001) break;
+          final available = dbl(lot['grams_available']);
+          final take = available < remaining ? available : remaining;
+          if (take <= 0) continue;
+          await txn.update(
+              'gold_inventory',
+              {
+                'grams_available': available - take,
+                'updated_at': nowIso(),
+                'version': (intv(lot['version']) + 1),
+                'sync_status': 'Pending'
+              },
+              where: 'id = ?',
+              whereArgs: [lot['id']]);
+          await txn.insert('gold_sale_allocations', {
+            'uuid': newUuid(),
+            'sale_uuid': sale['uuid'],
+            'lot_uuid': lot['uuid'],
+            'grams': take,
+            'created_at': sale['sale_date'],
+            'updated_at': nowIso(),
+            'device_id': deviceId,
+            'version': 1,
+            'deleted_at': null,
+            'sync_status': 'Pending'
+          });
+          remaining -= take;
+        }
+        if (remaining > 0.000001) {
+          await txn.insert('audit_log', {
+            ...meta(),
+            'device_id': deviceId,
+            'company_id': sale['company_id'],
+            'entity': 'sale',
+            'entity_uuid': sale['uuid'],
+            'action': 'MIGRATION_WARNING',
+            'detail':
+                'Mauzo ya zamani yalizidi gold lots zilizoweza kuthibitishwa kwa ${fmtNum(remaining)} g; hakiki taarifa za kihistoria.',
+            'user_name': 'Migration v7'
           });
         }
-        final sales = await txn.query('sales', where: 'voided = 0 AND gold_weight_g > 0', orderBy: 'sale_date ASC, id ASC');
-        for (final sale in sales) {
-          var remaining = dbl(sale['gold_weight_g']);
-          final lots = await txn.query('gold_inventory', where: 'company_id = ? AND mine_id = ? AND grams_available > 0 AND deleted_at IS NULL', whereArgs: [sale['company_id'], sale['mine_id']], orderBy: 'created_at ASC, id ASC');
-          for (final lot in lots) {
-            if (remaining <= 0.000001) break;
-            final available = dbl(lot['grams_available']);
-            final take = available < remaining ? available : remaining;
-            if (take <= 0) continue;
-            await txn.update('gold_inventory', {'grams_available': available - take, 'updated_at': nowIso(), 'version': (intv(lot['version']) + 1), 'sync_status': 'Pending'}, where: 'id = ?', whereArgs: [lot['id']]);
-            await txn.insert('gold_sale_allocations', {'uuid': newUuid(), 'sale_uuid': sale['uuid'], 'lot_uuid': lot['uuid'], 'grams': take, 'created_at': sale['sale_date'], 'updated_at': nowIso(), 'device_id': deviceId, 'version': 1, 'deleted_at': null, 'sync_status': 'Pending'});
-            remaining -= take;
-          }
-          if (remaining > 0.000001) {
-            await txn.insert('audit_log', {...meta(), 'device_id': deviceId, 'company_id': sale['company_id'], 'entity': 'sale', 'entity_uuid': sale['uuid'], 'action': 'MIGRATION_WARNING', 'detail': 'Mauzo ya zamani yalizidi gold lots zilizoweza kuthibitishwa kwa ${fmtNum(remaining)} g; hakiki taarifa za kihistoria.', 'user_name': 'Migration v7'});
-          }
-        }
       }
+    }
 
-      // Trigger huweka updated_at/version/device_id hata pale UI inaposasisha rekodi.
-      for (final table in syncTables) {
-        if (!existingTables.contains(table)) continue;
-        final trigger = 'trg_${table}_v7_meta';
-        await txn.execute('DROP TRIGGER IF EXISTS $trigger');
-        final triggerInfo = await txn.rawQuery('PRAGMA table_info($table)');
-        final hasVoided = triggerInfo.any((r) => r['name'] == 'voided');
-        final deletedExpr = hasVoided
-            ? "CASE WHEN NEW.voided = 1 THEN COALESCE(NEW.deleted_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) ELSE NEW.deleted_at END"
-            : 'NEW.deleted_at';
-        await txn.execute('''CREATE TRIGGER $trigger AFTER UPDATE ON $table
+    // Trigger huweka updated_at/version/device_id hata pale UI inaposasisha rekodi.
+    for (final table in syncTables) {
+      if (!existingTables.contains(table)) continue;
+      final trigger = 'trg_${table}_v7_meta';
+      await txn.execute('DROP TRIGGER IF EXISTS $trigger');
+      final triggerInfo = await txn.rawQuery('PRAGMA table_info($table)');
+      final hasVoided = triggerInfo.any((r) => r['name'] == 'voided');
+      final deletedExpr = hasVoided
+          ? "CASE WHEN NEW.voided = 1 THEN COALESCE(NEW.deleted_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) ELSE NEW.deleted_at END"
+          : 'NEW.deleted_at';
+      await txn.execute('''CREATE TRIGGER $trigger AFTER UPDATE ON $table
           FOR EACH ROW BEGIN
             UPDATE $table SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
               device_id = COALESCE(NULLIF(NEW.device_id, ''), '$deviceId'),
@@ -553,12 +736,16 @@ class DatabaseHelper {
               deleted_at = $deletedExpr
             WHERE id = NEW.id;
           END''');
-      }
+    }
   }
 
   Future<String> getDeviceId() async {
     final db = await database;
-    final rows = await db.query('app_metadata', columns: ['value'], where: 'key = ?', whereArgs: ['device_id'], limit: 1);
+    final rows = await db.query('app_metadata',
+        columns: ['value'],
+        where: 'key = ?',
+        whereArgs: ['device_id'],
+        limit: 1);
     return rows.isEmpty ? '' : rows.first['value'] as String;
   }
 
@@ -964,7 +1151,9 @@ class DatabaseHelper {
         'SELECT 1 FROM mines WHERE company_id = ? AND LOWER(name) = LOWER(?)',
         [company, n],
       );
-      if (dup.isNotEmpty) throw AppError('Mgodi huu tayari upo kwenye kampuni hii.');
+      if (dup.isNotEmpty) {
+        throw AppError('Mgodi huu tayari upo kwenye kampuni hii.');
+      }
 
       final mm = meta();
       await txn.insert('mines', {
@@ -1026,7 +1215,9 @@ class DatabaseHelper {
     required double weightKg,
     double? grade,
     String? witness,
+    String? witnessUserUuid,
   }) async {
+    AppCtx.requireWrite();
     if (bags <= 0 || weightKg <= 0) {
       throw AppError('Magunia na uzito lazima viwe zaidi ya sifuri.');
     }
@@ -1058,6 +1249,8 @@ class DatabaseHelper {
         'estimated_grade': grade,
         'recorded_by': AppCtx.user,
         'witness': (witness ?? '').trim().isEmpty ? null : witness!.trim(),
+        'witness_user_uuid': witnessUserUuid,
+        'witness_verified': witnessUserUuid == null ? 0 : 1,
         'voided': 0,
       });
 
@@ -1150,6 +1343,12 @@ class DatabaseHelper {
         where: 'company_id = ? AND batch_id = ?',
         whereArgs: [cid, bid],
       );
+      // Hifadhi historia: Batch ID ya asili inahamia `original_batch_id`, UUID
+      // hazibadiliki, na ID inaweza kutumika tena bila kuvunja UNIQUE.
+      final archivedId = '$bid~V${uuid.substring(0, 8)}';
+      for (final sql in kArchiveBatchStatements) {
+        await txn.rawUpdate(sql, [archivedId, cid, bid]);
+      }
       await writeAudit(
         txn,
         entity: 'production',
@@ -1282,6 +1481,7 @@ class DatabaseHelper {
     String? witness,
     String? notes,
   }) async {
+    AppCtx.requireWrite();
     if (weightKg <= 0) {
       throw AppError('Uzito lazima uwe mkubwa kuliko sifuri.');
     }
@@ -1315,8 +1515,9 @@ class DatabaseHelper {
       final w = (witness ?? '').trim().isEmpty ? null : witness!.trim();
       final isFull = (available - weightKg).abs() < 0.000001;
       final status = batch['status'] as String;
-      final newStatus =
-          (status == 'Imechimbwa' || status == 'Imehamishwa') ? 'Imehamishwa' : status;
+      final newStatus = (status == 'Imechimbwa' || status == 'Imehamishwa')
+          ? 'Imehamishwa'
+          : status;
 
       String resultId = batchId;
 
@@ -1426,6 +1627,168 @@ class DatabaseHelper {
     });
   }
 
+  /// Huunganisha mabaki ya Batch mbili au zaidi za kampuni/mgodi uleule.
+  /// Kila chanzo, movement, Batch mpya na audit huandikwa kwa transaction moja.
+  Future<String> mergeBatches({
+    required List<String> batchIds,
+    required String targetLocation,
+    String? witness,
+    String? notes,
+  }) async {
+    AppCtx.requireWrite();
+    final ids = batchIds.map((id) => id.trim()).toList();
+    final location = targetLocation.trim();
+    if (ids.length < 2 ||
+        ids.any((id) => id.isEmpty) ||
+        ids.toSet().length != ids.length) {
+      throw AppError('Chagua Batch mbili au zaidi tofauti.');
+    }
+    if (location.isEmpty) throw AppError('Weka eneo la Batch mpya.');
+    checkWitness(witness);
+
+    final db = await database;
+    return db.transaction<String>((txn) async {
+      final sources = <Map<String, dynamic>>[];
+      for (final id in ids) {
+        final rows = await txn.query(
+          'ore_batches',
+          where: 'company_id = ? AND mine_id = ? AND batch_id = ?',
+          whereArgs: [AppCtx.company, AppCtx.mine, id],
+          limit: 1,
+        );
+        if (rows.isEmpty) {
+          throw AppError('Batch $id haijapatikana kwenye mgodi huu.');
+        }
+        final source = rows.single;
+        if (source['status'] == 'Imefutwa' ||
+            source['status'] == 'Imeunganishwa') {
+          throw AppError(
+              'Batch $id haiwezi kuunganishwa katika hali yake ya sasa.');
+        }
+        if (dbl(source['weight_kg']) <= 0) {
+          throw AppError('Batch $id haina ore iliyobaki.');
+        }
+        sources.add(source);
+      }
+
+      final totalWeight = sources.fold<double>(
+        0,
+        (total, source) => total + dbl(source['weight_kg']),
+      );
+      final parent = sources.first;
+      final parentBatchId = parent['batch_id'] as String;
+      final parentUuid = parent['uuid'] as String;
+      var targetBatchId = '';
+      var targetUuid = '';
+      do {
+        targetUuid = newUuid();
+        targetBatchId = 'M-${targetUuid.substring(0, 8).toUpperCase()}';
+      } while ((await txn.query(
+            'ore_batches',
+            columns: ['id'],
+            where: 'company_id = ? AND batch_id = ?',
+            whereArgs: [AppCtx.company, targetBatchId],
+            limit: 1,
+          ))
+              .isNotEmpty ||
+          (await txn.query(
+            'production_records',
+            columns: ['id'],
+            where: 'company_id = ? AND batch_id = ?',
+            whereArgs: [AppCtx.company, targetBatchId],
+            limit: 1,
+          ))
+              .isNotEmpty);
+
+      await txn.insert('ore_batches', {
+        ...meta(),
+        'uuid': targetUuid,
+        'company_id': AppCtx.company,
+        'mine_id': AppCtx.mine,
+        'batch_id': targetBatchId,
+        'source_location': parent['source_location'],
+        'current_location': location,
+        'weight_kg': totalWeight,
+        'initial_weight_kg': totalWeight,
+        'weight_initial_kg': totalWeight,
+        'status': 'Imehamishwa',
+        'parent_batch_id': parentBatchId,
+        'parent_batch_uuid': parentUuid,
+        'source_production_uuid': parent['source_production_uuid'],
+      });
+
+      final movedAt = nowIso();
+      final witnessName = (witness ?? '').trim();
+      for (final source in sources) {
+        final sourceId = source['batch_id'] as String;
+        final sourceUuid = source['uuid'] as String;
+        final sourceWeight = dbl(source['weight_kg']);
+        final changed = await txn.update(
+          'ore_batches',
+          {
+            'weight_kg': 0.0,
+            'status': 'Imeunganishwa',
+            'sync_status': 'Pending',
+          },
+          where: 'uuid = ? AND company_id = ? AND mine_id = ? '
+              'AND batch_id = ? AND weight_kg = ? AND status = ?',
+          whereArgs: [
+            sourceUuid,
+            AppCtx.company,
+            AppCtx.mine,
+            sourceId,
+            source['weight_kg'],
+            source['status'],
+          ],
+        );
+        if (changed != 1) {
+          throw AppError('Batch $sourceId imebadilika; jaribu tena.');
+        }
+
+        final detail = (notes ?? '').trim();
+        await txn.insert('batch_movements', {
+          ...meta(),
+          'company_id': AppCtx.company,
+          'batch_id': sourceId,
+          'child_batch_id': targetBatchId,
+          'from_location': source['current_location'],
+          'to_location': location,
+          'weight_kg': sourceWeight,
+          'movement_date': movedAt,
+          'moved_by': AppCtx.user,
+          'witness': witnessName.isEmpty ? null : witnessName,
+          'notes':
+              'Imeunganishwa kuwa Batch $targetBatchId${detail.isEmpty ? '' : '. $detail'}',
+        });
+        await txn.insert('batch_movements', {
+          ...meta(),
+          'company_id': AppCtx.company,
+          'batch_id': targetBatchId,
+          'from_location': source['current_location'],
+          'to_location': location,
+          'weight_kg': sourceWeight,
+          'movement_date': movedAt,
+          'moved_by': AppCtx.user,
+          'witness': witnessName.isEmpty ? null : witnessName,
+          'notes':
+              'Chanzo: Batch $sourceId${detail.isEmpty ? '' : '. $detail'}',
+        });
+      }
+
+      await writeAudit(
+        txn,
+        entity: 'batch_merge',
+        entityUuid: targetUuid,
+        action: 'Batch zimeunganishwa',
+        detail:
+            '${sources.map((s) => '${s['batch_id']} (${fmtNum(dbl(s['weight_kg']))} kg)').join(', ')}'
+            ' → $targetBatchId (${fmtNum(totalWeight)} kg).'
+            '${(notes ?? '').trim().isEmpty ? '' : ' ${notes!.trim()}'}',
+      );
+      return targetBatchId;
+    });
+  }
+
   Future<List<Map<String, dynamic>>> getBatchHistory(String batchId) async {
     final db = await database;
     return db.query(
@@ -1478,6 +1841,7 @@ class DatabaseHelper {
     String? witness,
     String? notes,
   }) async {
+    AppCtx.requireWrite();
     if (oreProcessedKg <= 0 ||
         goldRecoveredG < 0 ||
         tailingsKg < 0 ||
@@ -1538,12 +1902,20 @@ class DatabaseHelper {
 
       if (goldRecoveredG > 0) {
         await txn.insert('gold_inventory', {
-          'uuid': newUuid(), 'company_id': AppCtx.company, 'mine_id': batch['mine_id'],
-          'processing_uuid': pm['uuid'], 'batch_id': batchId,
-          'grams_initial': goldRecoveredG, 'grams_available': goldRecoveredG,
-          'purity_percent': purityPercent, 'created_at': processingDate,
-          'updated_at': nowIso(), 'device_id': AppCtx.deviceId, 'version': 1,
-          'deleted_at': null, 'sync_status': 'Pending',
+          'uuid': newUuid(),
+          'company_id': AppCtx.company,
+          'mine_id': batch['mine_id'],
+          'processing_uuid': pm['uuid'],
+          'batch_id': batchId,
+          'grams_initial': goldRecoveredG,
+          'grams_available': goldRecoveredG,
+          'purity_percent': purityPercent,
+          'created_at': processingDate,
+          'updated_at': nowIso(),
+          'device_id': AppCtx.deviceId,
+          'version': 1,
+          'deleted_at': null,
+          'sync_status': 'Pending',
         });
       }
 
@@ -1616,13 +1988,18 @@ class DatabaseHelper {
       final bid = r['batch_id'] as String;
       final ore = dbl(r['ore_processed_kg']);
 
-      final lots = await txn.query('gold_inventory', where: 'processing_uuid = ? AND deleted_at IS NULL', whereArgs: [uuid]);
+      final lots = await txn.query('gold_inventory',
+          where: 'processing_uuid = ? AND deleted_at IS NULL',
+          whereArgs: [uuid]);
       for (final lot in lots) {
-        final sold = await txn.rawQuery('''SELECT IFNULL(SUM(a.grams),0) AS grams
+        final sold = await txn.rawQuery(
+            '''SELECT IFNULL(SUM(a.grams),0) AS grams
           FROM gold_sale_allocations a JOIN sales s ON s.uuid = a.sale_uuid
-          WHERE a.lot_uuid = ? AND s.voided = 0 AND a.deleted_at IS NULL''', [lot['uuid']]);
+          WHERE a.lot_uuid = ? AND s.voided = 0 AND a.deleted_at IS NULL''',
+            [lot['uuid']]);
         if (dbl(sold.first['grams']) > 0.000001) {
-          throw AppError('Dhahabu ya uchakataji huu tayari imeuzwa. Ghairi mauzo husika kwanza.');
+          throw AppError(
+              'Dhahabu ya uchakataji huu tayari imeuzwa. Ghairi mauzo husika kwanza.');
         }
       }
 
@@ -1633,9 +2010,16 @@ class DatabaseHelper {
         whereArgs: [uuid],
       );
       await voidLinkedFinance(txn, 'Uchakataji', uuid, reason);
-      await txn.update('gold_inventory', {
-        'grams_available': 0.0, 'deleted_at': nowIso(), 'updated_at': nowIso(), 'sync_status': 'Pending'
-      }, where: 'processing_uuid = ?', whereArgs: [uuid]);
+      await txn.update(
+          'gold_inventory',
+          {
+            'grams_available': 0.0,
+            'deleted_at': nowIso(),
+            'updated_at': nowIso(),
+            'sync_status': 'Pending'
+          },
+          where: 'processing_uuid = ?',
+          whereArgs: [uuid]);
 
       final others = Sqflite.firstIntValue(await txn.rawQuery(
               'SELECT COUNT(*) FROM processing_records '
@@ -1686,7 +2070,8 @@ class DatabaseHelper {
   }
 
   /// Utafutaji wa ndani unaoheshimu kampuni/mgodi uliochaguliwa.
-  Future<List<Map<String, dynamic>>> searchAllRecords(String query) async {
+  Future<List<Map<String, dynamic>>> searchAllRecords(String query,
+      {int offset = 0, int limit = 50}) async {
     final q = query.trim();
     if (q.isEmpty) return [];
     final db = await database;
@@ -1701,40 +2086,60 @@ class DatabaseHelper {
     await add('''SELECT 'Uzalishaji' AS module, batch_id AS title,
       shaft_area || ' • ' || recorded_by AS details, shift_date AS record_date
       FROM production_records WHERE company_id = ? AND mine_id = ? AND voided = 0
-      AND (batch_id LIKE ? OR shaft_area LIKE ? OR recorded_by LIKE ?)''', [c,m,like,like,like]);
+      AND (batch_id LIKE ? OR shaft_area LIKE ? OR recorded_by LIKE ?)''',
+        [c, m, like, like, like]);
     await add('''SELECT 'Batch' AS module, batch_id AS title,
-      current_location || ' • ' || status AS details, created_at AS record_date
+      current_location || ' • ' || status AS details, created_at AS record_date,
+      'batch' AS ref_type, uuid AS ref_uuid
       FROM ore_batches WHERE company_id = ? AND mine_id = ? AND status != 'Imefutwa'
-      AND (batch_id LIKE ? OR source_location LIKE ? OR current_location LIKE ?)''', [c,m,like,like,like]);
+      AND (batch_id LIKE ? OR source_location LIKE ? OR current_location LIKE ? OR uuid LIKE ? OR IFNULL(original_batch_id,'') LIKE ?)''',
+        [c, m, like, like, like, like, like]);
+    await add('''SELECT 'Gold lot' AS module, g.batch_id AS title,
+      CAST(g.grams_available AS TEXT) || ' g zimebaki • lot ' || substr(g.uuid,1,8) AS details, g.created_at AS record_date,
+      'batch' AS ref_type, b.uuid AS ref_uuid
+      FROM gold_inventory g JOIN ore_batches b ON b.company_id = g.company_id AND b.batch_id = g.batch_id
+      WHERE g.company_id = ? AND g.mine_id = ? AND (g.batch_id LIKE ? OR g.uuid LIKE ?)''',
+        [c, m, like, like]);
+    await add('''SELECT 'Deni' AS module, party AS title,
+      direction || ' • ' || CAST(amount AS TEXT) AS details, IFNULL(due_date, created_at) AS record_date
+      FROM debts WHERE company_id = ? AND mine_id = ? AND voided = 0
+      AND (party LIKE ? OR description LIKE ?)''', [c, m, like, like]);
     await add('''SELECT 'Uhamisho wa Batch' AS module, bm.batch_id AS title,
       bm.from_location || ' → ' || bm.to_location || ' • ' || bm.moved_by AS details, bm.movement_date AS record_date
       FROM batch_movements bm JOIN ore_batches b
         ON b.company_id = bm.company_id
         AND b.batch_id = bm.batch_id
       WHERE bm.company_id = ? AND b.mine_id = ?
-      AND (bm.batch_id LIKE ? OR bm.child_batch_id LIKE ? OR bm.from_location LIKE ? OR bm.to_location LIKE ? OR bm.moved_by LIKE ?)''', [c,m,like,like,like,like,like]);
+      AND (bm.batch_id LIKE ? OR bm.child_batch_id LIKE ? OR bm.from_location LIKE ? OR bm.to_location LIKE ? OR bm.moved_by LIKE ?)''',
+        [c, m, like, like, like, like, like]);
     await add('''SELECT 'Usindikaji' AS module, batch_id AS title,
       processed_by || ' • ' || CAST(gold_recovered_g AS TEXT) || ' g' AS details, processing_date AS record_date
       FROM processing_records WHERE company_id = ? AND mine_id = ? AND voided = 0
-      AND (batch_id LIKE ? OR processed_by LIKE ? OR notes LIKE ?)''', [c,m,like,like,like]);
+      AND (batch_id LIKE ? OR processed_by LIKE ? OR notes LIKE ?)''',
+        [c, m, like, like, like]);
     await add('''SELECT 'Mfanyakazi' AS module, full_name AS title,
       role || ' • ' || IFNULL(phone,'') AS details, created_at AS record_date
       FROM workers WHERE company_id = ? AND mine_id = ? AND active = 1
-      AND (full_name LIKE ? OR phone LIKE ? OR role LIKE ?)''', [c,m,like,like,like]);
+      AND (full_name LIKE ? OR phone LIKE ? OR role LIKE ?)''',
+        [c, m, like, like, like]);
     await add('''SELECT 'Mauzo' AS module, buyer AS title,
-      CAST(gold_weight_g AS TEXT) || ' g • ' || IFNULL(reference,'') AS details, sale_date AS record_date
+      CAST(gold_weight_g AS TEXT) || ' g • ' || IFNULL(reference,'') AS details, sale_date AS record_date,
+      'sale' AS ref_type, uuid AS ref_uuid
       FROM sales WHERE company_id = ? AND mine_id = ? AND voided = 0
-      AND (buyer LIKE ? OR buyer_license LIKE ? OR reference LIKE ?)''', [c,m,like,like,like]);
+      AND (buyer LIKE ? OR buyer_license LIKE ? OR reference LIKE ? OR uuid LIKE ? OR sale_date LIKE ?)''',
+        [c, m, like, like, like, like, like]);
     await add('''SELECT 'Fedha' AS module, category AS title,
       type || ' • ' || IFNULL(description,'') || ' • ' || CAST(amount AS TEXT) AS details, trans_date AS record_date
       FROM finance_transactions WHERE company_id = ? AND mine_id = ? AND voided = 0
-      AND (category LIKE ? OR description LIKE ? OR reference LIKE ?)''', [c,m,like,like,like]);
+      AND (category LIKE ? OR description LIKE ? OR reference LIKE ? OR trans_date LIKE ?)''',
+        [c, m, like, like, like, like]);
     await add('''SELECT 'Stoo' AS module, name AS title,
       category || ' • ' || unit AS details, created_at AS record_date
       FROM inventory_items WHERE company_id = ? AND mine_id = ? AND active = 1
-      AND (name LIKE ? OR category LIKE ?)''', [c,m,like,like]);
-    results.sort((a,b) => '${b['record_date'] ?? ''}'.compareTo('${a['record_date'] ?? ''}'));
-    return results.take(100).toList();
+      AND (name LIKE ? OR category LIKE ?)''', [c, m, like, like]);
+    results.sort((a, b) =>
+        '${b['record_date'] ?? ''}'.compareTo('${a['record_date'] ?? ''}'));
+    return results.skip(offset).take(limit).toList();
   }
 
   // -------------------------------------------------------------------------

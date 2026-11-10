@@ -7,11 +7,13 @@ import 'utils.dart';
 // WAFANYAKAZI, MAHUDHURIO NA MALIPO
 // ===========================================================================
 extension HrDb on DatabaseHelper {
-  Future<List<Map<String, dynamic>>> getWorkers({bool activeOnly = false}) async {
+  Future<List<Map<String, dynamic>>> getWorkers(
+      {bool activeOnly = false}) async {
     final db = await database;
     return db.query(
       'workers',
-      where: 'company_id = ? AND mine_id = ?${activeOnly ? ' AND active = 1' : ''}',
+      where:
+          'company_id = ? AND mine_id = ?${activeOnly ? ' AND active = 1' : ''}',
       whereArgs: [AppCtx.company, AppCtx.mine],
       orderBy: 'active DESC, full_name COLLATE NOCASE',
     );
@@ -140,7 +142,11 @@ extension HrDb on DatabaseHelper {
     } else {
       await db.update(
         'attendance',
-        {'status': status, 'recorded_by': AppCtx.user, 'sync_status': 'Pending'},
+        {
+          'status': status,
+          'recorded_by': AppCtx.user,
+          'sync_status': 'Pending'
+        },
         where: 'worker_uuid = ? AND att_date = ?',
         whereArgs: [workerUuid, date],
       );
@@ -168,7 +174,9 @@ extension HrDb on DatabaseHelper {
     required String method,
     String? notes,
   }) async {
-    if (gross <= 0) throw AppError('Kiasi cha malipo lazima kiwe zaidi ya sifuri.');
+    if (gross <= 0) {
+      throw AppError('Kiasi cha malipo lazima kiwe zaidi ya sifuri.');
+    }
     if (deductions < 0 || deductions > gross) {
       throw AppError('Makato si sahihi.');
     }
@@ -289,7 +297,9 @@ extension FinanceDb on DatabaseHelper {
     String? description,
     required String method,
     String? reference,
+    String? batchUuid,
   }) async {
+    AppCtx.requireWrite();
     if (amount <= 0) throw AppError('Kiasi lazima kiwe zaidi ya sifuri.');
     final db = await database;
     await db.transaction((txn) async {
@@ -302,6 +312,11 @@ extension FinanceDb on DatabaseHelper {
         description: description,
         method: method,
         reference: reference,
+        batchUuid: type == 'Matumizi' ? batchUuid : null,
+        approvalStatus:
+            (type == 'Matumizi' && AppCtx.expenseApproval && !AppCtx.canApprove)
+                ? 'Inasubiri'
+                : 'Imeidhinishwa',
       );
       await writeAudit(txn,
           entity: 'finance',
@@ -331,7 +346,9 @@ extension FinanceDb on DatabaseHelper {
           where: 'uuid = ?', whereArgs: [uuid], limit: 1);
       if (rows.isEmpty) throw AppError('Muamala haujapatikana.');
       final r = rows.first;
-      if (intv(r['voided']) == 1) throw AppError('Muamala huu tayari umefutwa.');
+      if (intv(r['voided']) == 1) {
+        throw AppError('Muamala huu tayari umefutwa.');
+      }
       if (r['source'] != 'Mkono') {
         throw AppError(
           'Muamala huu umetokana na ${r['source']}. '
@@ -472,7 +489,10 @@ extension FinanceDb on DatabaseHelper {
         whereArgs: [uuid],
       );
       await writeAudit(txn,
-          entity: 'debt', entityUuid: uuid, action: 'Limefutwa', detail: reason);
+          entity: 'debt',
+          entityUuid: uuid,
+          action: 'Limefutwa',
+          detail: reason);
     });
   }
 }
@@ -588,7 +608,8 @@ extension InventoryDb on DatabaseHelper {
           category: kExpenseCategories.contains(cat) ? cat : 'Vifaa na Zana',
           amount: quantity * unitCost!,
           date: date,
-          description: 'Ununuzi: ${item['name']} (${fmtNum(quantity)} ${item['unit']})',
+          description:
+              'Ununuzi: ${item['name']} (${fmtNum(quantity)} ${item['unit']})',
           source: 'Stock',
           sourceUuid: mm['uuid'] as String,
         );
@@ -663,12 +684,15 @@ extension SalesDb on DatabaseHelper {
     String? witness,
     String? notes,
   }) async {
+    AppCtx.requireWrite();
     if (buyer.trim().isEmpty) throw AppError('Jina la mnunuzi linahitajika.');
     if (weightG <= 0) throw AppError('Uzito lazima uwe zaidi ya sifuri.');
     if (purityPct <= 0 || purityPct > 100) {
       throw AppError('Purity lazima iwe kati ya 0 na 100.');
     }
-    if (pricePerG <= 0) throw AppError('Bei kwa gramu lazima iwe zaidi ya sifuri.');
+    if (pricePerG <= 0) {
+      throw AppError('Bei kwa gramu lazima iwe zaidi ya sifuri.');
+    }
     if (otherFees < 0) throw AppError('Ada nyingine si sahihi.');
     checkWitness(witness);
 
@@ -722,7 +746,8 @@ extension SalesDb on DatabaseHelper {
       var gramsToAllocate = weightG;
       final lots = await txn.query(
         'gold_inventory',
-        where: 'company_id = ? AND mine_id = ? AND grams_available > 0 AND deleted_at IS NULL',
+        where:
+            'company_id = ? AND mine_id = ? AND grams_available > 0 AND deleted_at IS NULL',
         whereArgs: [AppCtx.company, AppCtx.mine],
         orderBy: 'created_at ASC, id ASC',
       );
@@ -731,21 +756,33 @@ extension SalesDb on DatabaseHelper {
         final available = dbl(lot['grams_available']);
         final take = available < gramsToAllocate ? available : gramsToAllocate;
         if (take <= 0) continue;
-        await txn.update('gold_inventory', {
-          'grams_available': available - take,
-          'updated_at': nowIso(),
-          'version': intv(lot['version']) + 1,
-          'sync_status': 'Pending',
-        }, where: 'id = ?', whereArgs: [lot['id']]);
+        await txn.update(
+            'gold_inventory',
+            {
+              'grams_available': available - take,
+              'updated_at': nowIso(),
+              'version': intv(lot['version']) + 1,
+              'sync_status': 'Pending',
+            },
+            where: 'id = ?',
+            whereArgs: [lot['id']]);
         await txn.insert('gold_sale_allocations', {
-          'uuid': newUuid(), 'sale_uuid': suuid, 'lot_uuid': lot['uuid'],
-          'grams': take, 'created_at': nowIso(), 'updated_at': nowIso(), 'device_id': AppCtx.deviceId,
-          'version': 1, 'deleted_at': null, 'sync_status': 'Pending',
+          'uuid': newUuid(),
+          'sale_uuid': suuid,
+          'lot_uuid': lot['uuid'],
+          'grams': take,
+          'created_at': nowIso(),
+          'updated_at': nowIso(),
+          'device_id': AppCtx.deviceId,
+          'version': 1,
+          'deleted_at': null,
+          'sync_status': 'Pending',
         });
         gramsToAllocate -= take;
       }
       if (gramsToAllocate > 0.000001) {
-        throw AppError('Imeshindikana kugawa dhahabu kwa FIFO; muamala umebatilishwa.');
+        throw AppError(
+            'Imeshindikana kugawa dhahabu kwa FIFO; muamala umebatilishwa.');
       }
       await insertFinanceTxn(
         txn,
@@ -807,17 +844,28 @@ extension SalesDb on DatabaseHelper {
       if (intv(rows.first['voided']) == 1) {
         throw AppError('Mauzo haya tayari yamefutwa.');
       }
-      final allocations = await txn.query('gold_sale_allocations', where: 'sale_uuid = ? AND deleted_at IS NULL', whereArgs: [uuid]);
+      final allocations = await txn.query('gold_sale_allocations',
+          where: 'sale_uuid = ? AND deleted_at IS NULL', whereArgs: [uuid]);
       for (final allocation in allocations) {
-        final lots = await txn.query('gold_inventory', where: 'uuid = ?', whereArgs: [allocation['lot_uuid']], limit: 1);
+        final lots = await txn.query('gold_inventory',
+            where: 'uuid = ?', whereArgs: [allocation['lot_uuid']], limit: 1);
         if (lots.isNotEmpty) {
           final lot = lots.first;
-          await txn.update('gold_inventory', {
-            'grams_available': dbl(lot['grams_available']) + dbl(allocation['grams']),
-            'updated_at': nowIso(), 'version': intv(lot['version']) + 1, 'sync_status': 'Pending'
-          }, where: 'id = ?', whereArgs: [lot['id']]);
+          await txn.update(
+              'gold_inventory',
+              {
+                'grams_available':
+                    dbl(lot['grams_available']) + dbl(allocation['grams']),
+                'updated_at': nowIso(),
+                'version': intv(lot['version']) + 1,
+                'sync_status': 'Pending'
+              },
+              where: 'id = ?',
+              whereArgs: [lot['id']]);
         }
-        await txn.update('gold_sale_allocations', {'deleted_at': nowIso(), 'sync_status': 'Pending'}, where: 'id = ?', whereArgs: [allocation['id']]);
+        await txn.update('gold_sale_allocations',
+            {'deleted_at': nowIso(), 'sync_status': 'Pending'},
+            where: 'id = ?', whereArgs: [allocation['id']]);
       }
       await txn.update(
         'sales',
@@ -827,7 +875,10 @@ extension SalesDb on DatabaseHelper {
       );
       await voidLinkedFinance(txn, 'Mauzo', uuid, reason);
       await writeAudit(txn,
-          entity: 'sale', entityUuid: uuid, action: 'Yamefutwa', detail: reason);
+          entity: 'sale',
+          entityUuid: uuid,
+          action: 'Yamefutwa',
+          detail: reason);
     });
   }
 }

@@ -1,8 +1,8 @@
-# Test status for merged package
+# Test status (v11 engineering completion)
 
-- ZIP archive integrity: checked successfully during packaging.
-- Search SQL statements: syntax-checked against temporary SQLite table definitions.
-- SQLite update-trigger pattern: tested with a temporary SQLite database.
-- `flutter analyze`, `flutter test`, Android APK build, v5-to-v7 migration on a real v5 database, FIFO sale/reversal and backup/restore: **not run in this packaging environment** because Flutter/Dart SDK and the user's real database are not available here.
+- Python SQLite migration suite: 47 tests pass, including synthetic v7-to-v8 and v8-to-v10 schema checks.
+- Backend core suite: 16 tests pass, including JWT secret length validation.
+- `flutter analyze`, `dart format`, `flutter test`, Android APK build, real v5/v6/v7 database upgrade, physical-device PIN benchmark, backup/restore on device, and Supabase/PostgreSQL tests: **not run here**. Flutter, Dart, Android SDK, and PostgreSQL are unavailable.
+- SQLite migration fixtures and MemoryRepo tests do not establish Flutter runtime or PostgreSQL integration correctness.
 
-The GitHub Actions workflow now runs `flutter analyze`, `flutter test`, and the release APK build after the package is pushed. Review every result before field use.
+Run the commands in `TESTING.md` and the staging steps in `CODESPACES_HANDOFF.md` before field use.

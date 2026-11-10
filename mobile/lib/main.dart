@@ -1,4 +1,8 @@
 import 'package:flutter/material.dart';
+import 'db_v8.dart';
+import 'l10n.dart';
+import 'local_auth.dart';
+import 'v8_pages.dart';
 import 'app_context.dart';
 import 'companies_page.dart';
 import 'database_helper.dart';
@@ -47,6 +51,13 @@ class _AppRootState extends State<AppRoot> {
   void initState() {
     super.initState();
     _init = AppCtx.load();
+    appReload.addListener(_reload);
+  }
+
+  @override
+  void dispose() {
+    appReload.removeListener(_reload);
+    super.dispose();
   }
 
   void _reload() {
@@ -79,6 +90,9 @@ class _AppRootState extends State<AppRoot> {
         if (!AppCtx.ready) {
           return SetupScreen(onDone: _reload);
         }
+        if (AppCtx.localAuthActive && AppCtx.userUuid.isEmpty) {
+          return LocalLoginPage(onDone: _reload);
+        }
         return const LockGate(child: DashboardScreen());
       },
     );
@@ -95,6 +109,7 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> {
   Map<String, dynamic> _stats = {};
   List<Map<String, dynamic>> _recent = [];
+  List<Map<String, Object?>> _dues = [];
   String _suggestedBatch = '';
   int _formKey = 0;
   bool _loading = true;
@@ -111,12 +126,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final stats = await db.dashboardStats();
       final recent = await db.getProductionRecords(limit: 5);
       final next = await db.nextBatchId();
+      final dues = await db.debtsDue();
 
       if (!mounted) return;
       setState(() {
         _stats = stats;
         _recent = recent;
         _suggestedBatch = next;
+        _dues = dues;
         _formKey++;
         _loading = false;
       });
@@ -221,6 +238,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                 ],
               ),
+              if (_dues.isNotEmpty)
+                Card(
+                  color: Colors.orange.shade50,
+                  child: ListTile(
+                    leading: const Icon(Icons.event_busy, color: Colors.orange),
+                    title: Text(tr('Madeni yanayohitaji kipaumbele')),
+                    subtitle: Text(_dues
+                        .take(3)
+                        .map((d) =>
+                            '${d['party']} • ${tr('Salio')} ${fmtMoney(dbl(d['amount']) - dbl(d['paid']))} • ${tr('Mwisho')} ${d['due_date']}')
+                        .join('\n')),
+                  ),
+                ),
               if (lowStock > 0)
                 Card(
                   color: Colors.red.shade50,
@@ -255,21 +285,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         FSpec('batch', 'Batch ID', initial: _suggestedBatch),
                         const FSpec('bags', 'Idadi ya magunia',
                             type: FType.integer),
-                        const FSpec('weight', 'Uzito (KG)', type: FType.decimal),
+                        const FSpec('weight', 'Uzito (KG)',
+                            type: FType.decimal),
                         const FSpec('grade', 'Estimated Grade (g/t)',
                             type: FType.decimal, required: false),
                         const FSpec(
                           'shift',
                           'Zamu',
                           type: FType.dropdown,
-                          options: [Opt('Mchana', 'Mchana'), Opt('Usiku', 'Usiku')],
+                          options: [
+                            Opt('Mchana', 'Mchana'),
+                            Opt('Usiku', 'Usiku')
+                          ],
                         ),
                         const FSpec('date', 'Tarehe', type: FType.date),
                         FSpec('witness', 'Shahidi (mtu wa pili)',
                             required: AppCtx.requireWitness),
                       ],
                       onSubmit: (v) async {
+                        final w = (v['witness'] ?? '').trim();
+                        final witnessUuid = w.isEmpty
+                            ? null
+                            : await LocalAuth.confirmWitness(context, w);
                         await DatabaseHelper.instance.recordProduction(
+                          witnessUserUuid: witnessUuid,
                           shaft: v['shaft']!,
                           batchId: v['batch']!,
                           shiftDate: v['date']!,
@@ -362,7 +401,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 }
 
-
 class GlobalSearchPage extends StatefulWidget {
   const GlobalSearchPage({super.key});
 
@@ -375,20 +413,35 @@ class _GlobalSearchPageState extends State<GlobalSearchPage> {
   List<Map<String, dynamic>> _results = [];
   bool _loading = false;
   String? _error;
+  int _limit = 50;
 
   Future<void> _search(String value) async {
     if (value.trim().isEmpty) {
-      setState(() { _results = []; _error = null; _loading = false; });
+      setState(() {
+        _results = [];
+        _error = null;
+        _loading = false;
+      });
       return;
     }
-    setState(() { _loading = true; _error = null; });
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
-      final rows = await DatabaseHelper.instance.searchAllRecords(value);
+      final rows =
+          await DatabaseHelper.instance.searchAllRecords(value, limit: _limit);
       if (!mounted) return;
-      setState(() { _results = rows; _loading = false; });
+      setState(() {
+        _results = rows;
+        _loading = false;
+      });
     } catch (e) {
       if (!mounted) return;
-      setState(() { _loading = false; _error = errText(e); });
+      setState(() {
+        _loading = false;
+        _error = errText(e);
+      });
     }
   }
 
@@ -400,48 +453,87 @@ class _GlobalSearchPageState extends State<GlobalSearchPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Tafuta taarifa')),
-    body: Column(children: [
-      Padding(
-        padding: const EdgeInsets.all(16),
-        child: TextField(
-          controller: _controller,
-          autofocus: true,
-          onChanged: _search,
-          decoration: InputDecoration(
-            prefixIcon: const Icon(Icons.search),
-            hintText: 'Batch ID, eneo, mfanyakazi, mnunuzi...',
-            suffixIcon: IconButton(
-              tooltip: 'Futa',
-              onPressed: () { _controller.clear(); _search(''); },
-              icon: const Icon(Icons.clear),
-            ),
-            border: const OutlineInputBorder(),
-          ),
-        ),
-      ),
-      if (_loading) const LinearProgressIndicator(),
-      if (_error != null) Padding(
-        padding: const EdgeInsets.all(16), child: Text(_error!),
-      ),
-      Expanded(
-        child: _results.isEmpty
-          ? Center(child: Text(_controller.text.trim().isEmpty
-              ? 'Andika neno au Batch ID kutafuta.'
-              : 'Hakuna taarifa zilizopatikana.'))
-          : ListView.builder(
-              itemCount: _results.length,
-              itemBuilder: (context, index) {
-                final row = _results[index];
-                return ListTile(
-                  leading: const Icon(Icons.search),
-                  title: Text('${row['title'] ?? ''}'),
-                  subtitle: Text('${row['module'] ?? ''} • ${row['details'] ?? ''}'),
-                  trailing: Text('${row['record_date'] ?? ''}', style: Theme.of(context).textTheme.bodySmall),
-                );
+        appBar: AppBar(title: Text(tr('Tafuta taarifa'))),
+        body: Column(children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: TextField(
+              controller: _controller,
+              autofocus: true,
+              onChanged: (v) {
+                _limit = 50;
+                _search(v);
               },
+              decoration: InputDecoration(
+                prefixIcon: const Icon(Icons.search),
+                hintText: 'Batch ID, eneo, mfanyakazi, mnunuzi...',
+                suffixIcon: IconButton(
+                  tooltip: 'Futa',
+                  onPressed: () {
+                    _controller.clear();
+                    _search('');
+                  },
+                  icon: const Icon(Icons.clear),
+                ),
+                border: const OutlineInputBorder(),
+              ),
             ),
-      ),
-    ]),
-  );
+          ),
+          if (_loading) const LinearProgressIndicator(),
+          if (_error != null)
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(_error!),
+            ),
+          Expanded(
+            child: _results.isEmpty
+                ? Center(
+                    child: Text(_controller.text.trim().isEmpty
+                        ? tr('Andika neno au Batch ID kutafuta.')
+                        : tr('Hakuna taarifa zilizopatikana.')))
+                : ListView.builder(
+                    itemCount:
+                        _results.length + (_results.length >= _limit ? 1 : 0),
+                    itemBuilder: (context, index) {
+                      if (index == _results.length) {
+                        return Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: OutlinedButton(
+                            onPressed: () {
+                              _limit += 50;
+                              _search(_controller.text);
+                            },
+                            child: Text(tr('Onyesha zaidi')),
+                          ),
+                        );
+                      }
+                      final row = _results[index];
+                      final refType = row['ref_type'];
+                      final refUuid = row['ref_uuid'] as String?;
+                      return ListTile(
+                        leading: const Icon(Icons.search),
+                        title: Text('${row['title'] ?? ''}'),
+                        subtitle: Text(
+                            '${row['module'] ?? ''} • ${row['details'] ?? ''}'),
+                        trailing: Text('${row['record_date'] ?? ''}',
+                            style: Theme.of(context).textTheme.bodySmall),
+                        onTap: refUuid == null
+                            ? null
+                            : () {
+                                if (refType == 'batch') {
+                                  Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                          builder: (_) => TraceabilityPage(
+                                              batchUuid: refUuid)));
+                                } else if (refType == 'sale') {
+                                  showSaleSources(context, refUuid);
+                                }
+                              },
+                      );
+                    },
+                  ),
+          ),
+        ]),
+      );
 }

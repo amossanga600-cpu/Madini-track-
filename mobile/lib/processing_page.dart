@@ -64,10 +64,12 @@ Future<bool> showProcessForm(BuildContext context, {String? batchId}) async {
       const FSpec('cost', 'Gharama ya uchakataji (TSh)',
           type: FType.decimal, required: false),
       const FSpec('date', 'Tarehe', type: FType.date),
-      FSpec('witness', 'Shahidi (mtu wa pili)', required: AppCtx.requireWitness),
+      FSpec('witness', 'Shahidi (mtu wa pili)',
+          required: AppCtx.requireWitness),
       const FSpec('notes', 'Maelezo', type: FType.multiline, required: false),
     ],
-    note: 'Uzito wa Batch utapunguzwa kiotomatiki kulingana na ore iliyochakatwa.',
+    note:
+        'Uzito wa Batch utapunguzwa kiotomatiki kulingana na ore iliyochakatwa.',
     preview: (v) {
       final ore = parseNum(v['ore']);
       final gold = parseNum(v['gold']);
@@ -155,7 +157,8 @@ class _ProcessingPageState extends State<ProcessingPage> {
   }
 
   Future<void> _void(Map<String, dynamic> r) async {
-    final reason = await askReason(context, 'Futa uchakataji wa ${r['batch_id']}?');
+    final reason =
+        await askReason(context, 'Futa uchakataji wa ${r['batch_id']}?');
     if (reason == null) return;
     try {
       await DatabaseHelper.instance.voidProcessing(r['uuid'] as String, reason);
@@ -170,8 +173,10 @@ class _ProcessingPageState extends State<ProcessingPage> {
   @override
   Widget build(BuildContext context) {
     final active = _rows.where((r) => intv(r['voided']) == 0).toList();
-    final totalGold = active.fold<double>(0, (s, r) => s + dbl(r['gold_recovered_g']));
-    final totalOre = active.fold<double>(0, (s, r) => s + dbl(r['ore_processed_kg']));
+    final totalGold =
+        active.fold<double>(0, (s, r) => s + dbl(r['gold_recovered_g']));
+    final totalOre =
+        active.fold<double>(0, (s, r) => s + dbl(r['ore_processed_kg']));
 
     return Scaffold(
       appBar: AppBar(title: const Text('Processing & Gold Recovery')),
@@ -217,7 +222,8 @@ class _ProcessingPageState extends State<ProcessingPage> {
             const SizedBox(height: 8),
             Card(
               child: ListTile(
-                leading: const Icon(Icons.savings_outlined, color: Colors.orange),
+                leading:
+                    const Icon(Icons.savings_outlined, color: Colors.orange),
                 title: const Text('Dhahabu iliyopo (haijauzwa)'),
                 trailing: Text(
                   fmtG(_goldBalance),
@@ -249,7 +255,9 @@ class _ProcessingPageState extends State<ProcessingPage> {
     return Card(
       child: ListTile(
         leading: Icon(
-          low && !voided ? Icons.warning_amber : Icons.precision_manufacturing_outlined,
+          low && !voided
+              ? Icons.warning_amber
+              : Icons.precision_manufacturing_outlined,
           color: low && !voided ? Colors.red : null,
         ),
         title: Text(

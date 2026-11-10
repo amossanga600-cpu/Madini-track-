@@ -1,7 +1,7 @@
 name: madini_tracker
 description: Offline-first multi-mine management mobile app for Tanzania.
 publish_to: 'none'
-version: 1.2.0+3
+version: 2.2.0+6
 
 environment:
   sdk: '>=3.0.0 <4.0.0'
@@ -12,11 +12,21 @@ dependencies:
   sqflite: ^2.3.0
   path: ^1.8.3
   http: ^1.6.0
+  crypto: ^3.0.3
+  cryptography: ^2.7.0
+  path_provider: ^2.1.4
+  share_plus: ^10.1.4
+  cross_file: ^0.3.4+2
+  pdf: ^3.11.3
+  file_picker: ^10.3.10
+  image_picker: ^1.1.2
+  flutter_secure_storage: ^9.2.2
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
+  sqflite_common_ffi: ^2.3.3
 
 flutter:
   uses-material-design: true

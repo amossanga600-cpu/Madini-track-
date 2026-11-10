@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'app_context.dart';
 import 'database_helper.dart';
 import 'db_reports.dart';
 import 'utils.dart';
+import 'report_export_service.dart';
 
 class ReportsPage extends StatefulWidget {
   const ReportsPage({super.key});
@@ -48,9 +48,12 @@ class _ReportsPageState extends State<ReportsPage> {
       periodLabel: _periods[_sel].label,
       scopeLabel: _scopeLabel,
     );
-    await Clipboard.setData(ClipboardData(text: text));
-    if (!mounted) return;
-    snack(context, 'Ripoti imenakiliwa. Bandika WhatsApp au barua pepe.');
+    await ReportExportService.sharePdf(
+      title: 'Ripoti ya Uendeshaji',
+      period: _periods[_sel].label,
+      scope: _scopeLabel,
+      body: text,
+    );
   }
 
   Future<void> _copyCsv(String kind) async {
@@ -61,9 +64,11 @@ class _ReportsPageState extends State<ReportsPage> {
       to: p.to,
       allMines: _allMines,
     );
-    await Clipboard.setData(ClipboardData(text: csv));
-    if (!mounted) return;
-    snack(context, 'CSV ya $kind imenakiliwa. Bandika kwenye Excel/Sheets.');
+    final safe = kind.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '_');
+    await ReportExportService.shareCsv(
+      csv,
+      'madini_track_${safe}_${DateTime.now().millisecondsSinceEpoch}.csv',
+    );
   }
 
   Widget _section(String title, IconData icon, List<Widget> children) {
@@ -98,21 +103,24 @@ class _ReportsPageState extends State<ReportsPage> {
         actions: [
           if (r != null)
             IconButton(
-              tooltip: 'Nakili ripoti',
+              tooltip: 'Shiriki PDF ya ripoti',
               icon: const Icon(Icons.copy_all),
               onPressed: _copyReport,
             ),
           PopupMenuButton<String>(
-            tooltip: 'Nakili CSV',
+            tooltip: 'Hamisha CSV',
             icon: const Icon(Icons.table_chart_outlined),
             onSelected: _copyCsv,
             itemBuilder: (_) => const [
-              PopupMenuItem(value: 'Uzalishaji', child: Text('CSV: Uzalishaji')),
-              PopupMenuItem(value: 'Uchakataji', child: Text('CSV: Uchakataji')),
+              PopupMenuItem(
+                  value: 'Uzalishaji', child: Text('CSV: Uzalishaji')),
+              PopupMenuItem(
+                  value: 'Uchakataji', child: Text('CSV: Uchakataji')),
               PopupMenuItem(value: 'Fedha', child: Text('CSV: Fedha')),
               PopupMenuItem(value: 'Mauzo', child: Text('CSV: Mauzo')),
               PopupMenuItem(value: 'Mishahara', child: Text('CSV: Mishahara')),
-              PopupMenuItem(value: 'Batch', child: Text('CSV: Mizania ya Batch')),
+              PopupMenuItem(
+                  value: 'Batch', child: Text('CSV: Mizania ya Batch')),
             ],
           ),
         ],
@@ -133,7 +141,8 @@ class _ReportsPageState extends State<ReportsPage> {
             const SizedBox(height: 8),
             SegmentedButton<bool>(
               segments: [
-                ButtonSegment(value: false, label: Text('Mgodi ${AppCtx.mine}')),
+                ButtonSegment(
+                    value: false, label: Text('Mgodi ${AppCtx.mine}')),
                 const ButtonSegment(value: true, label: Text('Migodi yote')),
               ],
               selected: {_allMines},
@@ -200,7 +209,8 @@ class _ReportsPageState extends State<ReportsPage> {
         KV('Mishahara (${intv(pay['n'])} malipo)', fmtMoney(dbl(pay['net']))),
       ]),
       _section('Dhahabu na Mizania ya Batch', Icons.diamond_outlined, [
-        KV('Dhahabu iliyopo (haijauzwa)', fmtG(dbl(r['gold_balance'])), bold: true),
+        KV('Dhahabu iliyopo (haijauzwa)', fmtG(dbl(r['gold_balance'])),
+            bold: true),
         KV('Batch zinazofuatiliwa', '${batches.length}'),
         if (mismatch.isEmpty)
           const Padding(
@@ -211,7 +221,8 @@ class _ReportsPageState extends State<ReportsPage> {
           const SizedBox(height: 6),
           Text(
             'Tahadhari: Batch ${mismatch.length} zina tofauti ya uzito.',
-            style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+            style:
+                const TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
           ),
           for (final b in mismatch)
             KV('${b['batch_id']}', '${fmtNum(dbl(b['diff']))} kg'),
@@ -226,7 +237,7 @@ class _ReportsPageState extends State<ReportsPage> {
       FilledButton.icon(
         onPressed: _copyReport,
         icon: const Icon(Icons.copy_all),
-        label: const Text('Nakili Ripoti (WhatsApp / Email)'),
+        label: const Text('Tengeneza na Shiriki PDF ya Ripoti'),
       ),
     ];
   }
