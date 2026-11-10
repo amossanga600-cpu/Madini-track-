@@ -11,3 +11,4 @@
 flutter/
 *.zip
 *.zip
+__pycache__/

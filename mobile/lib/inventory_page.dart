@@ -97,7 +97,8 @@ class _InventoryPageState extends State<InventoryPage> {
   }
 
   Future<void> _history(Map<String, dynamic> item) async {
-    final rows = await DatabaseHelper.instance.getStockMovements(item['uuid'] as String);
+    final rows =
+        await DatabaseHelper.instance.getStockMovements(item['uuid'] as String);
     if (!mounted) return;
     await showModalBottomSheet<void>(
       context: context,
@@ -118,8 +119,11 @@ class _InventoryPageState extends State<InventoryPage> {
                 Card(
                   child: ListTile(
                     leading: Icon(
-                      m['move_type'] == 'Ingia' ? Icons.add_circle_outline : Icons.remove_circle_outline,
-                      color: m['move_type'] == 'Ingia' ? Colors.green : Colors.red,
+                      m['move_type'] == 'Ingia'
+                          ? Icons.add_circle_outline
+                          : Icons.remove_circle_outline,
+                      color:
+                          m['move_type'] == 'Ingia' ? Colors.green : Colors.red,
                     ),
                     title: Text(
                       '${m['move_type']}: ${fmtNum(dbl(m['quantity']))} ${item['unit']}',
@@ -137,11 +141,12 @@ class _InventoryPageState extends State<InventoryPage> {
                             icon: const Icon(Icons.delete_outline),
                             tooltip: 'Futa kwa sababu',
                             onPressed: () async {
-                              final reason = await askReason(ctx, 'Futa rekodi hii?');
+                              final reason =
+                                  await askReason(ctx, 'Futa rekodi hii?');
                               if (reason == null) return;
                               try {
-                                await DatabaseHelper.instance
-                                    .voidStockMovement(m['uuid'] as String, reason);
+                                await DatabaseHelper.instance.voidStockMovement(
+                                    m['uuid'] as String, reason);
                                 if (ctx.mounted) Navigator.pop(ctx);
                                 await _load();
                               } catch (e) {
@@ -181,7 +186,9 @@ class _InventoryPageState extends State<InventoryPage> {
                   color: _isLow(i) ? Colors.red.shade50 : null,
                   child: ListTile(
                     leading: Icon(
-                      _isLow(i) ? Icons.warning_amber : Icons.inventory_2_outlined,
+                      _isLow(i)
+                          ? Icons.warning_amber
+                          : Icons.inventory_2_outlined,
                       color: _isLow(i) ? Colors.red : null,
                     ),
                     title: Text(i['name'] as String),

@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
@@ -6,7 +8,7 @@ plugins {
 
 android {
     namespace = "com.madin.track.madini_tracker"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -29,11 +31,27 @@ android {
         versionName = flutter.versionName
     }
 
+    // Release signing: soma mobile/android/key.properties (HAIMO kwenye repo; angalia docs/RELEASE.md).
+    val keyProps = Properties()
+    val keyFile = rootProject.file("key.properties")
+    if (keyFile.exists()) keyFile.inputStream().use { keyProps.load(it) }
+
+    signingConfigs {
+        if (keyFile.exists()) {
+            create("release") {
+                keyAlias = keyProps["keyAlias"] as String
+                keyPassword = keyProps["keyPassword"] as String
+                storeFile = file(keyProps["storeFile"] as String)
+                storePassword = keyProps["storePassword"] as String
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // Bila key.properties, APK ya majaribio inasainiwa kwa debug key (HAIFAI kwa Play Store).
+            signingConfig = if (keyFile.exists()) signingConfigs.getByName("release")
+                            else signingConfigs.getByName("debug")
         }
     }
 }

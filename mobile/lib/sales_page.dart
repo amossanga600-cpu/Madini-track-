@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'app_context.dart';
 import 'database_helper.dart';
 import 'db_modules.dart';
+import 'evidence.dart';
+import 'v8_pages.dart';
 import 'utils.dart';
 
 class SalesPage extends StatefulWidget {
@@ -41,7 +43,8 @@ class _SalesPageState extends State<SalesPage> {
     final ok = await showSpecSheet(
       context,
       title: 'Rekodi Mauzo ya Dhahabu',
-      note: 'Dhahabu iliyopo: ${fmtG(_balance)}. Mrabaha ${fmtNum(AppCtx.royaltyPercent)}% '
+      note:
+          'Dhahabu iliyopo: ${fmtG(_balance)}. Mrabaha ${fmtNum(AppCtx.royaltyPercent)}% '
           'na ada ya ukaguzi ${fmtNum(AppCtx.inspectionPercent)}% '
           '(unaweza kubadilisha kwenye Mipangilio).',
       fields: [
@@ -49,8 +52,7 @@ class _SalesPageState extends State<SalesPage> {
         const FSpec('buyer', 'Mnunuzi'),
         const FSpec('license', 'Namba ya leseni ya mnunuzi', required: false),
         const FSpec('weight', 'Uzito wa dhahabu (gramu)', type: FType.decimal),
-        const FSpec('purity', 'Purity (%)',
-            type: FType.decimal, initial: '90'),
+        const FSpec('purity', 'Purity (%)', type: FType.decimal, initial: '90'),
         const FSpec('price', 'Bei kwa gramu ya dhahabu safi (TSh)',
             type: FType.decimal),
         const FSpec('fees', 'Ada nyingine (TSh)',
@@ -58,14 +60,17 @@ class _SalesPageState extends State<SalesPage> {
         FSpec('method', 'Njia ya malipo',
             type: FType.dropdown, options: optsOf(kPayMethods)),
         const FSpec('reference', 'Namba ya risiti / rejea', required: false),
-        FSpec('witness', 'Shahidi (mtu wa pili)', required: AppCtx.requireWitness),
+        FSpec('witness', 'Shahidi (mtu wa pili)',
+            required: AppCtx.requireWitness),
         const FSpec('notes', 'Maelezo', type: FType.multiline, required: false),
       ],
       preview: (v) {
         final w = parseNum(v['weight']);
         final pu = parseNum(v['purity']);
         final pr = parseNum(v['price']);
-        if (w == null || pu == null || pr == null || w <= 0 || pu <= 0) return '';
+        if (w == null || pu == null || pr == null || w <= 0 || pu <= 0) {
+          return '';
+        }
         final c = calcSale(
           weightG: w,
           purityPct: pu,
@@ -164,7 +169,8 @@ class _SalesPageState extends State<SalesPage> {
             const SizedBox(height: 8),
             Card(
               child: ListTile(
-                leading: const Icon(Icons.savings_outlined, color: Colors.orange),
+                leading:
+                    const Icon(Icons.savings_outlined, color: Colors.orange),
                 title: const Text('Dhahabu iliyopo (haijauzwa)'),
                 trailing: Text(fmtG(_balance),
                     style: Theme.of(context).textTheme.titleMedium),
@@ -206,6 +212,24 @@ class _SalesPageState extends State<SalesPage> {
                       KV('Aliyeingiza', '${s['created_by'] ?? ''}'),
                       if ((s['witness'] ?? '').toString().isNotEmpty)
                         KV('Shahidi', '${s['witness']}'),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton.icon(
+                          onPressed: () => showAttachSheet(
+                              context, 'sales', s['uuid'] as String),
+                          icon: const Icon(Icons.photo_camera_outlined),
+                          label: const Text('Ushahidi (risiti/malipo)'),
+                        ),
+                      ),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton.icon(
+                          onPressed: () =>
+                              showSaleSources(context, s['uuid'] as String),
+                          icon: const Icon(Icons.account_tree_outlined),
+                          label: const Text('Chanzo cha dhahabu'),
+                        ),
+                      ),
                       if (intv(s['voided']) == 1)
                         KV('Imefutwa', '${s['void_reason']}')
                       else

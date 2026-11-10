@@ -36,8 +36,7 @@ String newUuid() {
 
 String nowIso() => DateTime.now().toIso8601String();
 
-String dateStr(DateTime d) =>
-    '${d.year.toString().padLeft(4, '0')}-'
+String dateStr(DateTime d) => '${d.year.toString().padLeft(4, '0')}-'
     '${d.month.toString().padLeft(2, '0')}-'
     '${d.day.toString().padLeft(2, '0')}';
 
@@ -83,7 +82,8 @@ String fmtNum(num? v, {int decimals = 2}) {
     if (i > 0 && (intPart.length - i) % 3 == 0) buf.write(',');
     buf.write(intPart[i]);
   }
-  final res = parts.length > 1 ? '${buf.toString()}.${parts[1]}' : buf.toString();
+  final res =
+      parts.length > 1 ? '${buf.toString()}.${parts[1]}' : buf.toString();
   return neg ? '-$res' : res;
 }
 
@@ -196,8 +196,7 @@ const List<String> kInventoryCategories = [
   'Nyingine',
 ];
 
-List<Opt> optsOf(List<String> items) =>
-    items.map((e) => Opt(e, e)).toList();
+List<Opt> optsOf(List<String> items) => items.map((e) => Opt(e, e)).toList();
 
 // ---------------------------------------------------------------------------
 // Vipindi vya ripoti
@@ -552,7 +551,8 @@ class _SpecFormState extends State<SpecForm> {
   Future<void> _submit() async {
     for (final f in widget.fields) {
       if (f.type == FType.dropdown && f.required && f.options.isEmpty) {
-        setState(() => _error = 'Hakuna chaguo la "${f.label}". Ongeza kwanza.');
+        setState(
+            () => _error = 'Hakuna chaguo la "${f.label}". Ongeza kwanza.');
         return;
       }
     }
@@ -585,7 +585,8 @@ class _SpecFormState extends State<SpecForm> {
             decoration: InputDecoration(
               labelText: f.label,
               border: const OutlineInputBorder(),
-              errorText: f.required ? 'Hakuna chaguo lililopo. Ongeza kwanza.' : null,
+              errorText:
+                  f.required ? 'Hakuna chaguo lililopo. Ongeza kwanza.' : null,
             ),
             child: const Text('-'),
           );

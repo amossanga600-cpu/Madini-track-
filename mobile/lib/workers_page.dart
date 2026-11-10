@@ -39,7 +39,8 @@ class _WorkersPageState extends State<WorkersPage> {
   Map<String, String> _attendance = {};
   String _attDate = todayStr();
 
-  String _from = dateStr(DateTime(DateTime.now().year, DateTime.now().month, 1));
+  String _from =
+      dateStr(DateTime(DateTime.now().year, DateTime.now().month, 1));
   String _to = todayStr();
   final Map<String, int> _days = {};
   List<Map<String, dynamic>> _payments = [];
@@ -105,7 +106,9 @@ class _WorkersPageState extends State<WorkersPage> {
         FSpec('phone', 'Simu',
             required: false, initial: (w['phone'] ?? '').toString()),
         FSpec('role', 'Kazi',
-            type: FType.dropdown, options: optsOf(kRoles), initial: w['role'] as String),
+            type: FType.dropdown,
+            options: optsOf(kRoles),
+            initial: w['role'] as String),
         FSpec('payType', 'Aina ya malipo',
             type: FType.dropdown,
             options: optsOf(kPayTypes),
@@ -155,7 +158,8 @@ class _WorkersPageState extends State<WorkersPage> {
             Card(
               child: ListTile(
                 leading: CircleAvatar(
-                  child: Text((w['full_name'] as String).substring(0, 1).toUpperCase()),
+                  child: Text(
+                      (w['full_name'] as String).substring(0, 1).toUpperCase()),
                 ),
                 title: Text(
                   w['full_name'] as String,
@@ -253,7 +257,11 @@ class _WorkersPageState extends State<WorkersPage> {
                     Wrap(
                       spacing: 8,
                       children: [
-                        for (final st in const ['Amehudhuria', 'Hajafika', 'Ruhusa'])
+                        for (final st in const [
+                          'Amehudhuria',
+                          'Hajafika',
+                          'Ruhusa'
+                        ])
                           ChoiceChip(
                             label: Text(st),
                             selected: _attendance[w['uuid']] == st,
@@ -273,7 +281,8 @@ class _WorkersPageState extends State<WorkersPage> {
   Future<void> _pay(Map<String, dynamic> w) async {
     final uuid = w['uuid'] as String;
     final days = _days[uuid] ?? 0;
-    final suggested = calcPay(w['pay_type'] as String, dbl(w['pay_rate']), days);
+    final suggested =
+        calcPay(w['pay_type'] as String, dbl(w['pay_rate']), days);
 
     final ok = await showSpecSheet(
       context,
@@ -282,7 +291,8 @@ class _WorkersPageState extends State<WorkersPage> {
           '${payTypeHelp(w['pay_type'] as String)}',
       fields: [
         FSpec('gross', 'Kiasi cha malipo (TSh)',
-            type: FType.decimal, initial: suggested > 0 ? suggested.toStringAsFixed(0) : null),
+            type: FType.decimal,
+            initial: suggested > 0 ? suggested.toStringAsFixed(0) : null),
         const FSpec('ded', 'Makato (TSh)',
             type: FType.decimal, required: false, initial: '0'),
         FSpec('method', 'Njia ya malipo',
@@ -315,7 +325,8 @@ class _WorkersPageState extends State<WorkersPage> {
   }
 
   Future<void> _voidPay(Map<String, dynamic> p) async {
-    final reason = await askReason(context, 'Futa malipo ya ${p['full_name']}?');
+    final reason =
+        await askReason(context, 'Futa malipo ya ${p['full_name']}?');
     if (reason == null) return;
     try {
       await DatabaseHelper.instance.voidPayment(p['uuid'] as String, reason);
@@ -333,7 +344,8 @@ class _WorkersPageState extends State<WorkersPage> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        Text('Kipindi cha malipo', style: Theme.of(context).textTheme.titleMedium),
+        Text('Kipindi cha malipo',
+            style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
         Row(
           children: [
@@ -384,7 +396,8 @@ class _WorkersPageState extends State<WorkersPage> {
               ),
             ),
         const SizedBox(height: 16),
-        Text('Malipo ya Karibuni', style: Theme.of(context).textTheme.titleLarge),
+        Text('Malipo ya Karibuni',
+            style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: 8),
         if (_payments.isEmpty)
           const EmptyCard('Bado hakuna malipo.')
@@ -409,7 +422,8 @@ class _WorkersPageState extends State<WorkersPage> {
                     : PopupMenuButton<String>(
                         onSelected: (_) => _voidPay(p),
                         itemBuilder: (_) => const [
-                          PopupMenuItem(value: 'v', child: Text('Futa kwa sababu')),
+                          PopupMenuItem(
+                              value: 'v', child: Text('Futa kwa sababu')),
                         ],
                       ),
               ),

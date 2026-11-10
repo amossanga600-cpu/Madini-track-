@@ -14,7 +14,8 @@ class SetupScreen extends StatelessWidget {
       future: DatabaseHelper.instance.getCompanies(),
       builder: (context, snap) {
         if (!snap.hasData) {
-          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          return const Scaffold(
+              body: Center(child: CircularProgressIndicator()));
         }
 
         final needCompany = snap.data!.isEmpty;
@@ -35,7 +36,8 @@ class SetupScreen extends StatelessWidget {
           body: ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              const Icon(Icons.diamond_outlined, size: 56, color: Colors.orange),
+              const Icon(Icons.diamond_outlined,
+                  size: 56, color: Colors.orange),
               const SizedBox(height: 12),
               Text(
                 'Tuanze kwa kuweka taarifa za msingi',
@@ -57,12 +59,16 @@ class SetupScreen extends StatelessWidget {
                     submitLabel: 'Anza Kutumia',
                     onSubmit: (v) async {
                       final db = DatabaseHelper.instance;
-                      if (needUser) await db.setSetting('user_name', v['user']!);
+                      if (needUser) {
+                        await db.setSetting('user_name', v['user']!);
+                      }
                       if (needCompany) {
                         await db.addCompany(
                           name: v['company']!,
                           mineName: v['mine']!,
-                          location: (v['location'] ?? '').isEmpty ? null : v['location'],
+                          location: (v['location'] ?? '').isEmpty
+                              ? null
+                              : v['location'],
                         );
                         await db.setSetting('active_company', v['company']!);
                         await db.setSetting('active_mine', v['mine']!);

@@ -45,7 +45,8 @@ Future<bool> showContextSwitcher(BuildContext context) async {
                   ? null
                   : Text(m['location'] as String),
               onTap: () async {
-                await AppCtx.setActive(c['name'] as String, m['name'] as String);
+                await AppCtx.setActive(
+                    c['name'] as String, m['name'] as String);
                 if (ctx.mounted) Navigator.pop(ctx, true);
               },
             ),
@@ -82,7 +83,7 @@ class _CompaniesPageState extends State<CompaniesPage> {
       final n = c['name'] as String;
       _mines[n] = await db.getMines(n);
     }
-    if (!mounted) return;
+    if (!context.mounted) return;
     setState(() {
       _companies = companies;
       _loading = false;
@@ -163,7 +164,8 @@ class _CompaniesPageState extends State<CompaniesPage> {
                               Expanded(
                                 child: Text(
                                   c['name'] as String,
-                                  style: Theme.of(context).textTheme.titleMedium,
+                                  style:
+                                      Theme.of(context).textTheme.titleMedium,
                                 ),
                               ),
                               TextButton.icon(
@@ -201,7 +203,7 @@ class _CompaniesPageState extends State<CompaniesPage> {
                                           c['name'] as String,
                                           m['name'] as String,
                                         );
-                                        if (!mounted) return;
+                                        if (!context.mounted) return;
                                         snack(context, 'Umebadilisha mgodi.');
                                         setState(() {});
                                       },

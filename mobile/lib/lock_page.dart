@@ -1,43 +1,18 @@
 import 'package:flutter/material.dart';
 import 'app_context.dart';
-import 'database_helper.dart';
+import 'local_auth.dart';
+import 'utils.dart';
 
-/// Hash rahisi ya PIN yenye chumvi (salt). Ni kizuizi cha kufungua app,
-/// si usimbaji wa data ndani ya database.
+/// Huhifadhiwa kwa uthibitisho wa nyuma wa PIN zilizowekwa kabla ya v11.
 String hashPin(String pin, String salt) {
-  var h = 0xcbf29ce484222325;
-  final input = '$salt:$pin';
-  for (var round = 0; round < 5000; round++) {
-    for (final u in input.codeUnits) {
-      h ^= u;
-      h = (h * 0x100000001b3) & 0x7fffffffffffffff;
-    }
-  }
-  return h.toRadixString(16);
+  return LocalAuth.legacyPinHash(pin, salt);
 }
 
-Future<void> savePin(String pin) async {
-  final salt = DateTime.now().microsecondsSinceEpoch.toString();
-  final db = DatabaseHelper.instance;
-  await db.setSetting('pin_salt', salt);
-  await db.setSetting('pin_hash', hashPin(pin, salt));
-  AppCtx.hasPin = true;
-}
+Future<void> savePin(String pin) => LocalAuth.saveAppPin(pin);
 
-Future<void> removePin() async {
-  final db = DatabaseHelper.instance;
-  await db.deleteSetting('pin_salt');
-  await db.deleteSetting('pin_hash');
-  AppCtx.hasPin = false;
-}
+Future<void> removePin() => LocalAuth.removeAppPin();
 
-Future<bool> verifyPin(String pin) async {
-  final db = DatabaseHelper.instance;
-  final salt = await db.getSetting('pin_salt');
-  final hash = await db.getSetting('pin_hash');
-  if (salt == null || hash == null) return true;
-  return hashPin(pin, salt) == hash;
-}
+Future<bool> verifyPin(String pin) => LocalAuth.verifyAppPin(pin);
 
 /// Inafunika app kwa PIN ikiwa imewekwa, na kufunga tena baada ya app
 /// kukaa nyuma kwa zaidi ya dakika moja.
@@ -101,6 +76,7 @@ class _LockScreenState extends State<LockScreen> {
   final _pin = TextEditingController();
   String? _error;
   int _fails = 0;
+  bool _checking = false;
   DateTime? _blockedUntil;
 
   @override
@@ -110,28 +86,38 @@ class _LockScreenState extends State<LockScreen> {
   }
 
   Future<void> _submit() async {
+    if (_checking) return;
     final b = _blockedUntil;
     if (b != null && DateTime.now().isBefore(b)) {
       setState(() => _error = 'Subiri kidogo kabla ya kujaribu tena.');
       return;
     }
 
-    final ok = await verifyPin(_pin.text.trim());
-    if (!mounted) return;
+    setState(() {
+      _checking = true;
+      _error = null;
+    });
+    try {
+      final ok = await verifyPin(_pin.text.trim());
+      if (!mounted) return;
+      if (ok) {
+        widget.onUnlock();
+        return;
+      }
 
-    if (ok) {
-      widget.onUnlock();
-      return;
-    }
-
-    _fails++;
-    _pin.clear();
-    if (_fails >= 5) {
-      _blockedUntil = DateTime.now().add(const Duration(seconds: 30));
-      _fails = 0;
-      setState(() => _error = 'Umekosea mara nyingi. Subiri sekunde 30.');
-    } else {
-      setState(() => _error = 'PIN si sahihi.');
+      _fails++;
+      _pin.clear();
+      if (_fails >= 5) {
+        _blockedUntil = DateTime.now().add(const Duration(seconds: 30));
+        _fails = 0;
+        setState(() => _error = 'Umekosea mara nyingi. Subiri sekunde 30.');
+      } else {
+        setState(() => _error = 'PIN si sahihi.');
+      }
+    } catch (e) {
+      if (mounted) setState(() => _error = errText(e));
+    } finally {
+      if (mounted) setState(() => _checking = false);
     }
   }
 
@@ -167,7 +153,10 @@ class _LockScreenState extends State<LockScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                FilledButton(onPressed: _submit, child: const Text('Fungua')),
+                FilledButton(
+                  onPressed: _checking ? null : _submit,
+                  child: Text(_checking ? 'Inathibitisha…' : 'Fungua'),
+                ),
               ],
             ),
           ),

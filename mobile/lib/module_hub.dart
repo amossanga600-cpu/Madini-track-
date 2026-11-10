@@ -7,7 +7,10 @@ import 'inventory_page.dart';
 import 'processing_page.dart';
 import 'production_page.dart';
 import 'reports_page.dart';
+import 'l10n.dart';
+import 'local_auth.dart';
 import 'sales_page.dart';
+import 'v8_pages.dart';
 import 'settings_page.dart';
 import 'workers_page.dart';
 
@@ -58,6 +61,36 @@ class ModuleHub extends StatelessWidget {
       'page': () => const SalesPage(),
     },
     {
+      'title': 'Usalama Mgodini',
+      'subtitle': 'Ajali, near miss, PPE na follow-up',
+      'icon': Icons.health_and_safety_outlined,
+      'page': () => const SafetyPage(),
+    },
+    {
+      'title': 'Rejista ya Ushahidi',
+      'subtitle': 'Picha na nyaraka za ushahidi',
+      'icon': Icons.photo_library_outlined,
+      'page': () => const EvidenceRegisterPage(),
+    },
+    {
+      'title': 'Ukaguzi wa Data',
+      'subtitle': 'Mass balance, gharama kwa Batch na uadilifu',
+      'icon': Icons.fact_check_outlined,
+      'page': () => const DataHealthPage(),
+    },
+    {
+      'title': 'Viwango vya Kodi na Ada',
+      'subtitle': 'Mrabaha na ada zenye tarehe na chanzo',
+      'icon': Icons.percent,
+      'page': () => const TaxRatesPage(),
+    },
+    {
+      'title': 'Usawazishaji (Sync)',
+      'subtitle': 'Tuma rekodi kwenye seva kwa usalama',
+      'icon': Icons.sync,
+      'page': () => const SyncPage(),
+    },
+    {
       'title': 'Reports',
       'subtitle': 'Ripoti za kampuni na migodi',
       'icon': Icons.bar_chart_outlined,
@@ -68,6 +101,12 @@ class ModuleHub extends StatelessWidget {
       'subtitle': 'Usimamizi wa kampuni na maeneo',
       'icon': Icons.business_outlined,
       'page': () => const CompaniesPage(),
+    },
+    {
+      'title': 'Watumiaji wa Kifaa',
+      'subtitle': 'Kuingia kwa PIN, majukumu na shahidi aliyethibitishwa',
+      'icon': Icons.badge_outlined,
+      'page': () => const LocalUsersPage(),
     },
     {
       'title': 'Mipangilio',
@@ -105,14 +144,18 @@ class ModuleHub extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          ...modules.map((module) {
+          ...modules
+              .where((m) =>
+                  !AppCtx.localAuthActive ||
+                  roleCanOpenModule(AppCtx.role, m['title'] as String))
+              .map((module) {
             return Card(
               margin: const EdgeInsets.only(bottom: 10),
               child: ListTile(
                 leading: CircleAvatar(
                   child: Icon(module['icon'] as IconData),
                 ),
-                title: Text(module['title'] as String),
+                title: Text(tr(module['title'] as String)),
                 subtitle: Text(module['subtitle'] as String),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () {
