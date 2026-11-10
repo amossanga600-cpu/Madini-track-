@@ -24,6 +24,40 @@ const List<String> kSafetyTypes = [
 ];
 const List<String> kSafetySeverities = ['Ndogo', 'Wastani', 'Kubwa', 'Kifo'];
 const List<String> kFollowUp = ['Wazi', 'Inaendelea', 'Imefungwa'];
+const List<String> kIncidentCategories = [
+  'Kuanguka kwa miamba/udongo',
+  'Mlipuko/baruti',
+  'Mashine/vifaa',
+  'Kuanguka kutoka juu',
+  'Gesi/vumbi/hewa',
+  'Moto',
+  'Kemikali (zebaki/sianidi)',
+  'Umeme',
+  'Usafiri/magari',
+  'Nyingine',
+];
+const List<String> kRootCauses = [
+  'Haijulikani bado',
+  'Kitendo kisicho salama',
+  'Hali isiyo salama',
+  'Ukosefu wa mafunzo',
+  'Kasoro ya vifaa',
+  'Hali ya hewa/mazingira',
+  'Usimamizi hafifu',
+];
+const List<String> kInjuryClasses = [
+  'Hakuna',
+  'Huduma ya kwanza',
+  'Matibabu hospitalini',
+  'Siku za kupoteza kazi',
+  'Ulemavu wa kudumu',
+  'Kifo',
+];
+const List<String> kLostTimeClasses = [
+  'Siku za kupoteza kazi',
+  'Ulemavu wa kudumu',
+  'Kifo',
+];
 const List<String> kEvidenceKinds = [
   'Risiti',
   'Scale ticket',
@@ -34,6 +68,10 @@ const List<String> kEvidenceKinds = [
   'Malipo',
   'Ukaguzi',
   'Usalama',
+  'Kitambulisho',
+  'Eneo la tukio',
+  'Majeruhi',
+  'Kifaa kilichohusika',
   'Picha'
 ];
 
@@ -170,7 +208,8 @@ extension V8Db on DatabaseHelper {
         orderBy: 'occurred_at DESC, id DESC');
   }
 
-  Future<void> addSafetyIncident({
+  /// Inarudisha UUID ya tukio ili app iombe picha mara baada ya kuhifadhi.
+  Future<String> addSafetyIncident({
     required String type,
     required String severity,
     required String occurredAt,
@@ -180,12 +219,53 @@ extension V8Db on DatabaseHelper {
     String? actionTaken,
     String? officer,
     String? followUpDate,
+    String? category,
+    String? rootCause,
+    String? injuryClass,
+    String? injuredName,
+    String? bodyPart,
+    int lostWorkDays = 0,
+    String? witnesses,
+    String? equipment,
+    bool? ppeWorn,
+    bool workStopped = false,
+    bool reportedToAuthority = false,
+    String? authorityReference,
   }) async {
+    String? clean(String? v) {
+      final t = (v ?? '').trim();
+      return t.isEmpty ? null : t;
+    }
+
     if (description.trim().isEmpty) throw AppError('Eleza kilichotokea.');
     if (injured < 0) throw AppError('Idadi ya majeruhi si sahihi.');
+    if (lostWorkDays < 0) throw AppError('Siku za kupoteza kazi si sahihi.');
+    final cls = injuryClass ?? 'Hakuna';
+    if (clean(category) == null) {
+      throw AppError('Chagua kundi la tukio.');
+    }
+    if (injured > 0 && cls == 'Hakuna') {
+      throw AppError('Kuna majeruhi: chagua kiwango cha jeraha.');
+    }
+    if (injured == 0 && cls != 'Hakuna') {
+      throw AppError('Majeruhi ni 0 lakini kiwango cha jeraha si "Hakuna".');
+    }
+    if ((severity == 'Kifo') != (cls == 'Kifo')) {
+      throw AppError('Ukubwa "Kifo" na kiwango cha jeraha "Kifo" lazima '
+          'viendane.');
+    }
+    if (cls == 'Siku za kupoteza kazi' && lostWorkDays < 1) {
+      throw AppError('Weka siku za kupoteza kazi (angalau 1).');
+    }
+    if (lostWorkDays > 0 && !kLostTimeClasses.contains(cls)) {
+      throw AppError('Siku zimewekwa lakini kiwango cha jeraha hakiendani.');
+    }
+    if (reportedToAuthority && clean(authorityReference) == null) {
+      throw AppError('Weka namba ya rejea ya ripoti kwa mamlaka.');
+    }
     final db = await database;
+    final m = meta();
     await db.transaction((txn) async {
-      final m = meta();
       await txn.insert('safety_incidents', {
         ...m,
         'company_id': AppCtx.company,
@@ -193,37 +273,116 @@ extension V8Db on DatabaseHelper {
         'incident_type': type,
         'severity': severity,
         'occurred_at': occurredAt,
-        'location': (location ?? '').trim().isEmpty ? null : location!.trim(),
+        'location': clean(location),
         'description': description.trim(),
         'injured_count': injured,
-        'action_taken':
-            (actionTaken ?? '').trim().isEmpty ? null : actionTaken!.trim(),
-        'responsible_officer':
-            (officer ?? '').trim().isEmpty ? null : officer!.trim(),
+        'action_taken': clean(actionTaken),
+        'responsible_officer': clean(officer),
         'follow_up_status': 'Wazi',
-        'follow_up_date': (followUpDate ?? '').isEmpty ? null : followUpDate,
+        'follow_up_date': clean(followUpDate),
         'reported_by': AppCtx.user,
         'voided': 0,
+        'incident_category': clean(category),
+        'root_cause': clean(rootCause),
+        'injury_class': cls,
+        'injured_name': clean(injuredName),
+        'body_part': clean(bodyPart),
+        'lost_work_days': lostWorkDays,
+        'witnesses': clean(witnesses),
+        'equipment_involved': clean(equipment),
+        'ppe_worn': ppeWorn == null ? null : (ppeWorn ? 1 : 0),
+        'work_stopped': workStopped ? 1 : 0,
+        'reported_to_authority': reportedToAuthority ? 1 : 0,
+        'authority_reference': clean(authorityReference),
       });
       await writeAudit(txn,
           entity: 'safety',
           entityUuid: m['uuid'] as String,
           action: 'Imerekodiwa',
-          detail: '$type ($severity): ${description.trim()}');
+          detail: '$type ($severity) • ${clean(category)} • $cls: '
+              '${description.trim()}');
     });
+    return m['uuid'] as String;
   }
 
+  /// Kufunga tukio kuna masharti: chanzo kijulikane, hatua ya kurekebisha
+  /// iwepo; tukio Kubwa/Kifo linahitaji ripoti kwa mamlaka na angalau picha 1.
   Future<void> updateSafetyFollowUp(
-      String uuid, String status, String? note) async {
+    String uuid,
+    String status,
+    String? note, {
+    String? rootCause,
+    String? correctiveAction,
+    String? correctiveDue,
+    bool? reportedToAuthority,
+    String? authorityReference,
+  }) async {
     final db = await database;
     await db.transaction((txn) async {
-      final n = await txn.update(
+      final rows = await txn.query(
         'safety_incidents',
-        {'follow_up_status': status, 'sync_status': 'Pending'},
         where: 'uuid = ? AND voided = 0',
         whereArgs: [uuid],
+        limit: 1,
       );
-      if (n == 0) throw AppError('Rekodi haijapatikana.');
+      if (rows.isEmpty) throw AppError('Rekodi haijapatikana.');
+      final old = rows.first;
+      String pick(String? v, Object? previous) {
+        final t = (v ?? '').trim();
+        return t.isNotEmpty ? t : (previous ?? '').toString().trim();
+      }
+
+      final cause = pick(rootCause, old['root_cause']);
+      final action = pick(correctiveAction, old['corrective_action']);
+      final due = pick(correctiveDue, old['corrective_due']);
+      final ref = pick(authorityReference, old['authority_reference']);
+      final reported =
+          reportedToAuthority ?? intv(old['reported_to_authority']) == 1;
+      if (reported && ref.isEmpty) {
+        throw AppError('Weka namba ya rejea ya ripoti kwa mamlaka.');
+      }
+      final severe = old['severity'] == 'Kubwa' || old['severity'] == 'Kifo';
+      final closing = status == 'Imefungwa';
+      if (closing) {
+        if (cause.isEmpty || cause == 'Haijulikani bado') {
+          throw AppError('Weka chanzo cha tukio (root cause) kabla ya kufunga.');
+        }
+        if (action.isEmpty) {
+          throw AppError('Weka hatua ya kurekebisha kabla ya kufunga.');
+        }
+        if (severe) {
+          if (!reported) {
+            throw AppError('Tukio Kubwa/Kifo: weka kuwa limeripotiwa kwa '
+                'mamlaka husika kabla ya kufunga.');
+          }
+          final photos = Sqflite.firstIntValue(await txn.rawQuery(
+                'SELECT COUNT(*) FROM attachments '
+                'WHERE record_uuid = ? AND deleted_at IS NULL',
+                [uuid],
+              )) ??
+              0;
+          if (photos == 0) {
+            throw AppError('Tukio Kubwa/Kifo linahitaji angalau picha moja '
+                'ya ushahidi kabla ya kufunga.');
+          }
+        }
+      }
+      await txn.update(
+        'safety_incidents',
+        {
+          'follow_up_status': status,
+          'root_cause': cause.isEmpty ? null : cause,
+          'corrective_action': action.isEmpty ? null : action,
+          'corrective_due': due.isEmpty ? null : due,
+          'reported_to_authority': reported ? 1 : 0,
+          'authority_reference': ref.isEmpty ? null : ref,
+          'closed_by': closing ? AppCtx.user : null,
+          'closed_at': closing ? DateTime.now().toUtc().toIso8601String() : null,
+          'sync_status': 'Pending',
+        },
+        where: 'uuid = ?',
+        whereArgs: [uuid],
+      );
       await writeAudit(txn,
           entity: 'safety',
           entityUuid: uuid,

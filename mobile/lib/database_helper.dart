@@ -6,10 +6,11 @@ import 'app_context.dart';
 import 'migration_v8_sql.dart';
 import 'migration_v9_sql.dart';
 import 'migration_v10_sql.dart';
+import 'migration_v11_sql.dart';
 import 'utils.dart';
 
-/// Toleo la database v10: v9 + mass balance inayofuatilia transfers za merge.
-const int kDbVersion = 10;
+/// Toleo la database v11: v10 + ajali/usalama ya kiufundi (safu additive).
+const int kDbVersion = 11;
 
 /// Majedwali yote yanayoingia kwenye Backup / Restore.
 const List<String> kBackupTables = [
@@ -268,6 +269,7 @@ class DatabaseHelper {
     await _migrateToV8(db);
     await _migrateToV9(db);
     await _migrateToV10(db);
+    await _migrateToV11(db);
   }
 
   Future<void> _createProductionTable(Database db) async {
@@ -430,6 +432,9 @@ class DatabaseHelper {
     if (oldVersion < 10) {
       await _migrateToV10(db);
     }
+    if (oldVersion < 11) {
+      await _migrateToV11(db);
+    }
   }
 
   /// Schema v8. Inaendeshwa ndani ya transaction ya sqflite (onCreate/onUpgrade),
@@ -450,6 +455,13 @@ class DatabaseHelper {
   /// Schema v10: ledger ya uzito wa Batch inajumuisha transfers za merge.
   Future<void> _migrateToV10(Database db) async {
     for (final s in kV10Statements) {
+      await db.execute(s);
+    }
+  }
+
+  /// Schema v11: safu za ajali/usalama ya kiufundi (additive).
+  Future<void> _migrateToV11(Database db) async {
+    for (final s in kV11Statements) {
       await db.execute(s);
     }
   }

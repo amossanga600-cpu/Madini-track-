@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'app_context.dart';
 import 'database_helper.dart';
+import 'evidence.dart';
 import 'utils.dart';
 
 const List<String> kProcessMethods = [
@@ -280,8 +281,17 @@ class _ProcessingPageState extends State<ProcessingPage> {
         trailing: voided
             ? null
             : PopupMenuButton<String>(
-                onSelected: (_) => _void(r),
+                onSelected: (v) {
+                  if (v == 'photo') {
+                    showAttachSheet(
+                        context, 'processing_records', r['uuid'] as String);
+                  } else {
+                    _void(r);
+                  }
+                },
                 itemBuilder: (_) => const [
+                  PopupMenuItem(
+                      value: 'photo', child: Text('Piga picha (scale/dhahabu)')),
                   PopupMenuItem(value: 'void', child: Text('Futa kwa sababu')),
                 ],
               ),

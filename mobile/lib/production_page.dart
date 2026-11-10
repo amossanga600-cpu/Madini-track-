@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'database_helper.dart';
+import 'evidence.dart';
 import 'utils.dart';
 
 class ProductionPage extends StatefulWidget {
@@ -115,8 +116,19 @@ class _ProductionPageState extends State<ProductionPage> {
                     trailing: intv(r['voided']) == 1
                         ? null
                         : PopupMenuButton<String>(
-                            onSelected: (_) => _void(r),
+                            onSelected: (v) {
+                              if (v == 'photo') {
+                                showAttachSheet(context, 'production_records',
+                                    r['uuid'] as String);
+                              } else {
+                                _void(r);
+                              }
+                            },
                             itemBuilder: (_) => const [
+                              PopupMenuItem(
+                                value: 'photo',
+                                child: Text('Piga picha (mzigo/seal)'),
+                              ),
                               PopupMenuItem(
                                 value: 'void',
                                 child: Text('Futa kwa sababu'),

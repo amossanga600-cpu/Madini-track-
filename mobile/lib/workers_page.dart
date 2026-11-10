@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'database_helper.dart';
 import 'db_modules.dart';
+import 'evidence.dart';
 import 'utils.dart';
 
 const List<String> kPayTypes = ['Siku', 'Mwezi', 'Mgawo'];
@@ -175,9 +176,14 @@ class _WorkersPageState extends State<WorkersPage> {
                   onSelected: (v) {
                     if (v == 'edit') _editWorker(w);
                     if (v == 'active') _toggleActive(w);
+                    if (v == 'photo') {
+                      showAttachSheet(context, 'workers', w['uuid'] as String);
+                    }
                   },
                   itemBuilder: (_) => [
                     const PopupMenuItem(value: 'edit', child: Text('Hariri')),
+                    const PopupMenuItem(
+                        value: 'photo', child: Text('Picha / kitambulisho')),
                     PopupMenuItem(
                       value: 'active',
                       child: Text(intv(w['active']) == 1

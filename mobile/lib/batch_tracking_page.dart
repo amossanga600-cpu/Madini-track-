@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'app_context.dart';
 import 'database_helper.dart';
+import 'evidence.dart';
 import 'processing_page.dart';
 import 'utils.dart';
 import 'v8_pages.dart';
@@ -253,6 +254,10 @@ class _BatchTrackingPageState extends State<BatchTrackingPage> {
                               if (v == 'process') _process(b);
                               if (v == 'merge') _merge(b);
                               if (v == 'history') _history(b);
+                              if (v == 'photo') {
+                                showAttachSheet(
+                                    context, 'ore_batches', b['uuid'] as String);
+                              }
                             },
                             itemBuilder: (_) => [
                               if (dbl(b['weight_kg']) > 0)
@@ -267,6 +272,9 @@ class _BatchTrackingPageState extends State<BatchTrackingPage> {
                                     child: Text('Unganisha Batch')),
                               const PopupMenuItem(
                                   value: 'history', child: Text('Historia')),
+                              const PopupMenuItem(
+                                  value: 'photo',
+                                  child: Text('Piga picha (batch seal)')),
                             ],
                           ),
                   ),
