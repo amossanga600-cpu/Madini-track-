@@ -1,8 +1,36 @@
-# Test status (v11 engineering completion)
+# Hali ya majaribio
 
-- Python SQLite migration suite: 47 tests pass, including synthetic v7-to-v8 and v8-to-v10 schema checks.
-- Backend core suite: 16 tests pass, including JWT secret length validation.
-- `flutter analyze`, `dart format`, `flutter test`, Android APK build, real v5/v6/v7 database upgrade, physical-device PIN benchmark, backup/restore on device, and Supabase/PostgreSQL tests: **not run here**. Flutter, Dart, Android SDK, and PostgreSQL are unavailable.
-- SQLite migration fixtures and MemoryRepo tests do not establish Flutter runtime or PostgreSQL integration correctness.
+Hii inaonyesha matokeo ya session ya sasa pekee; si uthibitisho wa mazingira ya
+uzalishaji. Rekebisha namba baada ya kila run mpya.
 
-Run the commands in `TESTING.md` and the staging steps in `CODESPACES_HANDOFF.md` before field use.
+## Matokeo yaliyotekelezwa
+
+- `flutter pub get`: **PASS**.
+- `dart format --output=none --set-exit-if-changed lib test`: **PASS**, faili
+  36 zimekaguliwa, 0 zimebadilishwa.
+- `flutter analyze`: **PASS**, hakuna issues.
+- `flutter test`: **PASS, 45/45**.
+- SQLite migration/unit suite (`tools/db_tests`): **PASS, 52/52**.
+- Backend unit suite (`backend/tests`): **PASS, 16/16**.
+- `python3 -m compileall -q backend tools/db_tests`: **PASS**.
+- `git diff --check`: **PASS**.
+- Android debug APK: **FAIL**. `compileSdk` ni 36 na Android SDK 36 ipo.
+  Gradle daemon inatoweka wakati wa `:app:compileFlutterBuildDebug`; majaribio
+  kwa JDK 21, heap ndogo ya Kotlin na compilation ya Kotlin ndani ya process
+  hayakutatua tatizo. APK haikutengenezwa. `memory.events` haikuonyesha OOM,
+  kwa hiyo chanzo cha daemon kuisha hakijathibitishwa.
+- Release APK: **NOT RUN**; production keystore na `key.properties` hazipo.
+
+## Bado haijathibitishwa
+
+- SQLCipher native encryption, Android Keystore na plaintext database migration
+  kwenye simu halisi.
+- PostgreSQL/Supabase schema, RLS, locking, concurrency na API integration.
+- APK install/launch kwenye Android device/emulator; hakuna kifaa kilicho
+  attached. Release signing haijasanidiwa.
+- Restore ya backup halisi yenye data kubwa, vifaa viwili, field UAT, PIN
+  latency ya simu nafuu na legal/privacy review.
+
+SQLite FFI tests ni tests za SQLite wazi. Backend unit tests si ushahidi wa
+PostgreSQL. Tazama [`TESTING.md`](TESTING.md) kwa commands na utaratibu wa
+uthibitishaji.

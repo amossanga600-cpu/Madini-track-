@@ -21,4 +21,4 @@ Mmiliki/Msimamizi: yote. Meneja: yote + kuidhinisha. Mhasibu: fedha, mauzo, ripo
 ## Matatizo ya kawaida
 - Sync inakataa tukio: angalia kuwa jina la kampuni na UUID kwenye seva vinalingana na vya simu.
 - Mgongano: Usawazishaji > Migongano.
-- Hitilafu ya database: baada ya upgrade ya sasa, nakala ya kinga ni `madini_local.db.pre-v10.bak`; hifadhi na hakiki nakala hii kabla ya kuendelea.
+- Hitilafu ya database: baada ya upgrade ya sasa, nakala ya kinga ni `madini_local.db.pre-v11.bak`; hifadhi na hakiki nakala hii kabla ya kuendelea.

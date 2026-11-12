@@ -1,8 +1,9 @@
 import 'dart:io';
 
 import 'package:path/path.dart';
-import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_sqlcipher/sqflite.dart';
 import 'app_context.dart';
+import 'db_encryption.dart';
 import 'migration_v8_sql.dart';
 import 'migration_v9_sql.dart';
 import 'migration_v10_sql.dart';
@@ -216,6 +217,7 @@ class DatabaseHelper {
 
   static final DatabaseHelper instance = DatabaseHelper._();
   static Database? _database;
+  static DatabaseFactory? testFactory;
 
   Future<Database> get database async {
     if (_database != null) return _database!;
@@ -224,31 +226,59 @@ class DatabaseHelper {
   }
 
   Future<Database> _initDB() async {
+    final factory = testFactory;
+    if (factory != null) {
+      final path = join(await factory.getDatabasesPath(), 'madini_local.db');
+      await _backupBeforeUpgrade(path, factory: factory);
+      return factory.openDatabase(
+        path,
+        options: OpenDatabaseOptions(
+          version: kDbVersion,
+          onConfigure: _onConfigure,
+          onCreate: _createDB,
+          onUpgrade: _upgradeDB,
+        ),
+      );
+    }
+
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, 'madini_local.db');
+    final key = await DbEncryption.prepare(path);
 
-    await _backupBeforeUpgrade(path);
+    await _backupBeforeUpgrade(path, password: key);
 
     return openDatabase(
       path,
+      password: key,
       version: kDbVersion,
-      onConfigure: (db) async {
-        // Lazima iwashwe kwa kila connection; SQLite huizima kwa chaguo-msingi.
-        await db.execute('PRAGMA foreign_keys = ON');
-      },
+      onConfigure: _onConfigure,
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
   }
 
+  Future<void> _onConfigure(Database db) async {
+    // Lazima iwashwe kwa kila connection; SQLite huizima kwa chaguo-msingi.
+    await db.execute('PRAGMA foreign_keys = ON');
+  }
+
   /// Mkakati wa recovery: kabla ya upgrade, nakili faili la database la toleo
-  /// la zamani kando yake (`madini_local.db.pre-v8.bak`). Ikiwa migration
+  /// la zamani kando yake (`madini_local.db.pre-vN.bak`). Ikiwa migration
   /// itashindwa sqflite hurudisha transaction, na nakala hii inabaki kama kinga.
-  Future<void> _backupBeforeUpgrade(String path) async {
+  Future<void> _backupBeforeUpgrade(
+    String path, {
+    String? password,
+    DatabaseFactory? factory,
+  }) async {
     try {
       final f = File(path);
       if (!await f.exists()) return;
-      final probe = await openReadOnlyDatabase(path);
+      final probe = factory != null
+          ? await factory.openDatabase(
+              path,
+              options: OpenDatabaseOptions(readOnly: true),
+            )
+          : await openReadOnlyDatabase(path, password: password);
       final v = await probe.getVersion();
       await probe.close();
       if (v > 0 && v < kDbVersion) {
@@ -256,7 +286,7 @@ class DatabaseHelper {
         if (!await bak.exists()) await f.copy(bak.path);
       }
     } catch (_) {
-      // Nakala ya kinga isiizuie app kufunguka; tatizo halisi litaonekana kwenye open.
+      // Migration transaction bado hulinda schema; open ya kawaida itaonyesha hitilafu.
     }
   }
 
@@ -1188,13 +1218,47 @@ class DatabaseHelper {
   // -------------------------------------------------------------------------
   // Uzalishaji
   // -------------------------------------------------------------------------
+  Future<String> _batchDeviceTag() async {
+    final deviceId = (await getDeviceId())
+        .replaceAll(RegExp(r'[^a-fA-F0-9]'), '')
+        .toUpperCase();
+    if (deviceId.length != 32) {
+      throw AppError(
+        'Utambulisho wa kifaa haujakamilika. Fungua upya usanidi wa kifaa '
+        'kabla ya kutengeneza Batch.',
+      );
+    }
+    return deviceId.substring(deviceId.length - 12);
+  }
+
+  Future<bool> _batchIdExists(DatabaseExecutor executor, String batchId) async {
+    final batches = await executor.query(
+      'ore_batches',
+      columns: ['id'],
+      where: 'company_id = ? AND batch_id = ?',
+      whereArgs: [AppCtx.company, batchId],
+      limit: 1,
+    );
+    if (batches.isNotEmpty) return true;
+    final production = await executor.query(
+      'production_records',
+      columns: ['id'],
+      where: 'company_id = ? AND batch_id = ?',
+      whereArgs: [AppCtx.company, batchId],
+      limit: 1,
+    );
+    return production.isNotEmpty;
+  }
+
   Future<String> nextBatchId() async {
     final db = await database;
+    final deviceTag = await _batchDeviceTag();
     final now = DateTime.now();
     final prefix = 'B'
         '${(now.year % 100).toString().padLeft(2, '0')}'
         '${now.month.toString().padLeft(2, '0')}'
-        '${now.day.toString().padLeft(2, '0')}';
+        '${now.day.toString().padLeft(2, '0')}'
+        '-$deviceTag';
 
     var n = (Sqflite.firstIntValue(await db.rawQuery(
               'SELECT COUNT(*) FROM ore_batches '
@@ -1205,14 +1269,8 @@ class DatabaseHelper {
         1;
 
     while (true) {
-      final id = '$prefix-${n.toString().padLeft(2, '0')}';
-      final exists = await db.query(
-        'ore_batches',
-        where: 'company_id = ? AND batch_id = ?',
-        whereArgs: [AppCtx.company, id],
-        limit: 1,
-      );
-      if (exists.isEmpty) return id;
+      final id = '$prefix-${n.toString().padLeft(4, '0')}';
+      if (!await _batchIdExists(db, id)) return id;
       n++;
     }
   }
@@ -1237,13 +1295,7 @@ class DatabaseHelper {
 
     final db = await database;
     await db.transaction((txn) async {
-      final exists = await txn.query(
-        'ore_batches',
-        where: 'company_id = ? AND batch_id = ?',
-        whereArgs: [AppCtx.company, batchId],
-        limit: 1,
-      );
-      if (exists.isNotEmpty) {
+      if (await _batchIdExists(txn, batchId)) {
         throw AppError('Batch ID hii tayari imetumika kwenye kampuni hii.');
       }
 
@@ -1501,6 +1553,7 @@ class DatabaseHelper {
     checkWitness(witness);
 
     final db = await database;
+    final deviceTag = await _batchDeviceTag();
     return db.transaction<String>((txn) async {
       final rows = await txn.query(
         'ore_batches',
@@ -1564,16 +1617,10 @@ class DatabaseHelper {
                 )) ??
                 0) +
             1;
-        var childId = '$batchId-$n';
-        while ((await txn.query(
-          'ore_batches',
-          where: 'company_id = ? AND batch_id = ?',
-          whereArgs: [AppCtx.company, childId],
-          limit: 1,
-        ))
-            .isNotEmpty) {
+        var childId = '$batchId-S$deviceTag-$n';
+        while (await _batchIdExists(txn, childId)) {
           n++;
-          childId = '$batchId-$n';
+          childId = '$batchId-S$deviceTag-$n';
         }
 
         await txn.update(
@@ -1659,6 +1706,7 @@ class DatabaseHelper {
     checkWitness(witness);
 
     final db = await database;
+    final deviceTag = await _batchDeviceTag();
     return db.transaction<String>((txn) async {
       final sources = <Map<String, dynamic>>[];
       for (final id in ids) {
@@ -1694,23 +1742,9 @@ class DatabaseHelper {
       var targetUuid = '';
       do {
         targetUuid = newUuid();
-        targetBatchId = 'M-${targetUuid.substring(0, 8).toUpperCase()}';
-      } while ((await txn.query(
-            'ore_batches',
-            columns: ['id'],
-            where: 'company_id = ? AND batch_id = ?',
-            whereArgs: [AppCtx.company, targetBatchId],
-            limit: 1,
-          ))
-              .isNotEmpty ||
-          (await txn.query(
-            'production_records',
-            columns: ['id'],
-            where: 'company_id = ? AND batch_id = ?',
-            whereArgs: [AppCtx.company, targetBatchId],
-            limit: 1,
-          ))
-              .isNotEmpty);
+        targetBatchId =
+            'M-$deviceTag-${targetUuid.substring(0, 8).toUpperCase()}';
+      } while (await _batchIdExists(txn, targetBatchId));
 
       await txn.insert('ore_batches', {
         ...meta(),

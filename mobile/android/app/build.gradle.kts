@@ -31,17 +31,26 @@ android {
         versionName = flutter.versionName
     }
 
-    // Release signing: soma mobile/android/key.properties (HAIMO kwenye repo; angalia docs/RELEASE.md).
+    // Release signing: mobile/android/key.properties (haipaswi kuwekwa Git).
     val keyProps = Properties()
     val keyFile = rootProject.file("key.properties")
     if (keyFile.exists()) keyFile.inputStream().use { keyProps.load(it) }
+    val isReleaseTask = gradle.startParameter.taskNames.any {
+        it.contains("Release", ignoreCase = true)
+    }
+    if (isReleaseTask && !keyFile.exists()) {
+        throw GradleException(
+            "Release signing haijawekwa. Sanidi mobile/android/key.properties na "
+                + "keystore ya uzalishaji; release haitatumia debug key.",
+        )
+    }
 
     signingConfigs {
-        if (keyFile.exists()) {
-            create("release") {
+        create("release") {
+            if (keyFile.exists()) {
                 keyAlias = keyProps["keyAlias"] as String
                 keyPassword = keyProps["keyPassword"] as String
-                storeFile = file(keyProps["storeFile"] as String)
+                storeFile = rootProject.file(keyProps["storeFile"] as String)
                 storePassword = keyProps["storePassword"] as String
             }
         }
@@ -49,9 +58,7 @@ android {
 
     buildTypes {
         release {
-            // Bila key.properties, APK ya majaribio inasainiwa kwa debug key (HAIFAI kwa Play Store).
-            signingConfig = if (keyFile.exists()) signingConfigs.getByName("release")
-                            else signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }

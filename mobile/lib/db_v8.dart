@@ -1,7 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart' as crypto;
-import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_sqlcipher/sqflite.dart';
 
 import 'app_context.dart';
 import 'database_helper.dart';
@@ -345,7 +345,8 @@ extension V8Db on DatabaseHelper {
       final closing = status == 'Imefungwa';
       if (closing) {
         if (cause.isEmpty || cause == 'Haijulikani bado') {
-          throw AppError('Weka chanzo cha tukio (root cause) kabla ya kufunga.');
+          throw AppError(
+              'Weka chanzo cha tukio (root cause) kabla ya kufunga.');
         }
         if (action.isEmpty) {
           throw AppError('Weka hatua ya kurekebisha kabla ya kufunga.');
@@ -377,7 +378,8 @@ extension V8Db on DatabaseHelper {
           'reported_to_authority': reported ? 1 : 0,
           'authority_reference': ref.isEmpty ? null : ref,
           'closed_by': closing ? AppCtx.user : null,
-          'closed_at': closing ? DateTime.now().toUtc().toIso8601String() : null,
+          'closed_at':
+              closing ? DateTime.now().toUtc().toIso8601String() : null,
           'sync_status': 'Pending',
         },
         where: 'uuid = ?',

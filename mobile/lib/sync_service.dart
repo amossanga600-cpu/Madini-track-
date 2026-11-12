@@ -3,7 +3,7 @@ import 'dart:math';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
-import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_sqlcipher/sqflite.dart';
 
 import 'app_context.dart';
 import 'database_helper.dart';

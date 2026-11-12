@@ -3,7 +3,7 @@ import 'dart:math';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter/material.dart';
-import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_sqlcipher/sqflite.dart';
 
 import 'app_context.dart';
 import 'database_helper.dart';

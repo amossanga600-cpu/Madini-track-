@@ -24,6 +24,7 @@ void main() {
   setUpAll(() {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
+    DatabaseHelper.testFactory = databaseFactoryFfi;
   });
 
   setUp(() async {
