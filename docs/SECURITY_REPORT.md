@@ -9,10 +9,11 @@ penetration test wala review huru iliyofanyika.
 | Database ya simu | Production database factory hutumia `sqflite_sqlcipher`; ufunguo wa hex wa bits 256 hutengenezwa kwa `Random.secure` na kuhifadhiwa kupitia `flutter_secure_storage` (Android Keystore-backed). Android Auto Backup imezimwa. Migrations za plaintext zinatumia `sqlcipher_export` na huhakikiwa kabla ya kubadilisha faili. |
 | Hali ya uthibitisho wa encryption | Unit tests hujaribu key format, kutambua SQLite wazi na fail-closed kwa key iliyokosekana/haribika. Tests za SQLite hutumia FFI/plain SQLite kupitia test factory; hazithibitishi SQLCipher. Uhakiki wa kifaa halisi bado PENDING. |
 | Backup | `.mtbackup` ina checksum; inaweza kusimbwa AES-256-GCM kwa PBKDF2. Password ni ya hiari kwa API ya sasa; backup bila password si ya kushirikishwa kwa usalama. |
-| Seva | Argon2, JWT, RBAC/tenant checks, idempotency na conflict rules zipo kwenye code. Backend unit tests zimepita; FastAPI/PostgreSQL/Supabase integration haijathibitishwa hapa. |
-| Rate limiting | Inafanya kazi ndani ya instance moja tu. Si kinga kamili kwa multi-instance bila shared limiter/gateway. |
+| Seva | Argon2, JWT lifecycle/revocation, RBAC, company/mine checks, idempotency na conflict rules zipo. FastAPI/PostgreSQL local integration tests zimepita 4/4; Supabase/staging bado haijathibitishwa. |
+| Rate limiting | Login attempts huhesabiwa atomically kwenye PostgreSQL, hivyo replicas zinaweza kushiriki counter. Proxy client-IP, production abuse behavior na hosting monitoring bado havijajaribiwa. |
 | Audit | Backend ina append-only trigger. Audit ya simu ina actor/kampuni/mgodi/muda/operation lakini si append-only wala tamper-evident yenye hash-chain. |
-| Transport/tokens | Tokens huhifadhiwa kupitia secure storage. Production lazima itumie HTTPS. Certificate pinning haipo. |
+| DB privileges/RLS | Schema huwasha RLS bila client policies. API lazima itumie DB credential ya server pekee yenye `BYPASSRLS`, lakini bila DDL na bila audit update/delete; migration credential itengwe. `backend/grant_runtime.sql` ina grants zilizopendekezwa; role hizi hazijathibitishwa kwenye provider halisi. |
+| Transport/tokens | Tokens huhifadhiwa kupitia secure storage. Production config ina Caddy TLS na API hukataa production URL isiyo HTTPS. HTTPS deployment halisi haijafanywa; certificate pinning haipo. |
 
 ## Hatari na tahadhari
 
@@ -31,5 +32,6 @@ penetration test wala review huru iliyofanyika.
 ## Kabla ya production
 
 Fanya Android device test, PostgreSQL staging/security tests, review huru ya
-RBAC na secrets, backup/restore test, PIN performance benchmark, na legal/privacy
-review. Hadi hapo, matumizi ya data halisi ya mgodi ni hatari.
+RBAC na grants, backup/restore test, PIN performance benchmark, na legal/privacy
+review. API credential ya `BYPASSRLS` ni secret server-side; usiweke Flutter.
+Hadi hapo, matumizi ya data halisi ya mgodi ni hatari.

@@ -5,9 +5,9 @@ from argon2 import PasswordHasher
 from app.db import PostgresRepo
 
 def main():
-    dsn = os.environ.get('DATABASE_URL')
+    dsn = os.environ.get('MIGRATION_DATABASE_URL') or os.environ.get('DATABASE_URL')
     if not dsn:
-        raise SystemExit('Weka DATABASE_URL kwenye environment.')
+        raise SystemExit('Weka MIGRATION_DATABASE_URL au DATABASE_URL kwenye environment.')
     company = input('Jina la kampuni (LIFANANE na jina ndani ya app): ').strip()
     company_uuid = input('Kitambulisho (UUID) cha kampuni kutoka app: ').strip()
     if len(company_uuid) != 36:
@@ -19,8 +19,14 @@ def main():
     confirm = getpass.getpass('Rudia password: ')
     if password != confirm:
         raise SystemExit('Password hazifanani.')
-    result = PostgresRepo(dsn).bootstrap_company_owner(
-        company, username, PasswordHasher().hash(password), company_uuid)
+    repo = PostgresRepo(dsn)
+    repo.open()
+    try:
+        repo.migrate()
+        result = repo.bootstrap_company_owner(
+            company, username, PasswordHasher().hash(password), company_uuid)
+    finally:
+        repo.close()
     print('Kampuni na owner vimeundwa.')
     print('company_uuid:', result['company_uuid'])
     print('user_id:', result['user_id'])

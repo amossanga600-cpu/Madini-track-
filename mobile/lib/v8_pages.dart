@@ -562,7 +562,11 @@ class _SyncPageState extends State<SyncPage> {
                 trailing: _hasToken
                     ? TextButton(
                         onPressed: () async {
-                          await SyncService.logout();
+                          try {
+                            await SyncService.logout();
+                          } catch (e) {
+                            if (mounted) snack(context, errText(e));
+                          }
                           await _load();
                         },
                         child: const Text('Toka'))

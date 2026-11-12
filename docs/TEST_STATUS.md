@@ -1,36 +1,47 @@
 # Hali ya majaribio
 
-Hii inaonyesha matokeo ya session ya sasa pekee; si uthibitisho wa mazingira ya
-uzalishaji. Rekebisha namba baada ya kila run mpya.
+Matokeo yafuatayo yalipatikana kwenye session hii, kwa source tree ya sasa.
+Majaribio ya local PostgreSQL yanathibitisha API dhidi ya PostgreSQL container
+ya majaribio; hayathibitishi Supabase, staging/production deployment au simu.
 
-## Matokeo yaliyotekelezwa
+## Yaliyopimwa
 
-- `flutter pub get`: **PASS**.
-- `dart format --output=none --set-exit-if-changed lib test`: **PASS**, faili
-  36 zimekaguliwa, 0 zimebadilishwa.
-- `flutter analyze`: **PASS**, hakuna issues.
-- `flutter test`: **PASS, 45/45**.
-- SQLite migration/unit suite (`tools/db_tests`): **PASS, 52/52**.
-- Backend unit suite (`backend/tests`): **PASS, 16/16**.
-- `python3 -m compileall -q backend tools/db_tests`: **PASS**.
+- `PYTHONPATH=backend pytest -q`: **PASS, 72/72** (SQLite/database, backend
+  unit na PostgreSQL API integration tests).
+- PostgreSQL API integration tests zenyewe: **PASS, 4/4** dhidi ya PostgreSQL
+  16 container ya loopback `madini-postgres-test-20261112`. Zilijaribu migrations,
+  JWT lifecycle, DB rate limit, tenant/mine scope, idempotency, conflicts,
+  pagination, audit, batch trace na simultaneous duplicate delivery.
+- `python3 -m compileall -q backend`: **PASS**.
 - `git diff --check`: **PASS**.
-- Android debug APK: **FAIL**. `compileSdk` ni 36 na Android SDK 36 ipo.
-  Gradle daemon inatoweka wakati wa `:app:compileFlutterBuildDebug`; majaribio
-  kwa JDK 21, heap ndogo ya Kotlin na compilation ya Kotlin ndani ya process
-  hayakutatua tatizo. APK haikutengenezwa. `memory.events` haikuonyesha OOM,
-  kwa hiyo chanzo cha daemon kuisha hakijathibitishwa.
-- Release APK: **NOT RUN**; production keystore na `key.properties` hazipo.
+- `docker compose ... -f backend/compose.yaml config -q`: **PASS**.
+- `docker compose ... -f backend/compose.production.yaml config -q`: **PASS**
+  kwa sample placeholders pekee; hakuna credentials halisi zilizotumika.
+- `docker compose ... -f backend/compose.yaml build api`: **PASS**.
+- Flutter commands (`flutter pub get`, `dart format`, `flutter analyze`,
+  `flutter test`, debug/release build): **NOT RUN**; Flutter/Dart SDK haipo
+  kwenye mazingira haya. Matokeo ya session zilizopita si uthibitisho wa
+  mabadiliko ya sasa.
+
+Suite ya backend ilitoa onyo moja la Starlette kuhusu `httpx` kwenye
+`TestClient`; halikufeli jaribio. PostgreSQL tests ziliendeshwa dhidi ya
+container ya majaribio iliyopo, schema tofauti ya kipekee kwa kila test, si
+Supabase/provider ya uzalishaji.
 
 ## Bado haijathibitishwa
 
-- SQLCipher native encryption, Android Keystore na plaintext database migration
-  kwenye simu halisi.
-- PostgreSQL/Supabase schema, RLS, locking, concurrency na API integration.
-- APK install/launch kwenye Android device/emulator; hakuna kifaa kilicho
-  attached. Release signing haijasanidiwa.
-- Restore ya backup halisi yenye data kubwa, vifaa viwili, field UAT, PIN
-  latency ya simu nafuu na legal/privacy review.
+- Docker Compose deployment e2e, Caddy certificate issuance, domain/HTTPS,
+  production role grants/BYPASSRLS, secret manager, health monitoring.
+- PostgreSQL provider/Supabase staging, migration compatibility ya database ya
+  mmiliki, access-control ya provider na concurrency ya production load.
+- Flutter-to-live-API integration, Android debug APK build/install/launch na
+  vifaa viwili.
+- SQLCipher native encryption, Android Keystore na plaintext migration kwenye
+  simu halisi; backup/restore ya PostgreSQL au mobile kwa data halisi.
+- Release signing, backup retention/PITR drill, PIN latency ya simu nafuu,
+  field UAT, security/legal/privacy review.
 
-SQLite FFI tests ni tests za SQLite wazi. Backend unit tests si ushahidi wa
-PostgreSQL. Tazama [`TESTING.md`](TESTING.md) kwa commands na utaratibu wa
-uthibitishaji.
+**Haijathibitishwa kuwa tayari kibiashara.** Fuata
+[`DEPLOYMENT.md`](DEPLOYMENT.md), [`PENDING.md`](PENDING.md) na
+[`MARKET_READINESS_CHECKLIST.md`](MARKET_READINESS_CHECKLIST.md) kwa hatua
+zilizobaki.

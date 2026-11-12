@@ -114,14 +114,32 @@ class SyncService {
     return 'Seva imejibu ${res.statusCode}.';
   }
 
-  static Future<String?> serverUrl() =>
-      DatabaseHelper.instance.getSetting('sync_url');
+  static Future<String?> serverUrl() async {
+    final saved = await DatabaseHelper.instance.getSetting('sync_url');
+    return saved == null ? null : normalizeServerUrl(saved);
+  }
+
+  static String normalizeServerUrl(String url) {
+    final value = url.trim();
+    final uri = Uri.tryParse(value);
+    if (uri == null ||
+        !uri.hasAuthority ||
+        uri.host.isEmpty ||
+        uri.userInfo.isNotEmpty ||
+        uri.query.isNotEmpty ||
+        uri.fragment.isNotEmpty) {
+      throw AppError('Anwani ya seva si sahihi.');
+    }
+    final localHosts = {'localhost', '127.0.0.1', '::1', '10.0.2.2'};
+    if (uri.scheme != 'https' &&
+        !(uri.scheme == 'http' && localHosts.contains(uri.host))) {
+      throw AppError('Seva lazima itumie HTTPS; HTTP inaruhusiwa kwa majaribio ya kifaa cha ndani pekee.');
+    }
+    return uri.replace(path: uri.path.replaceAll(RegExp(r'/+$'), '')).toString();
+  }
 
   static Future<void> saveServerUrl(String url) async {
-    final u = url.trim().replaceAll(RegExp(r'/+$'), '');
-    if (!u.startsWith('https://') && !u.startsWith('http://')) {
-      throw AppError('Anwani ya seva lazima ianze na https://');
-    }
+    final u = normalizeServerUrl(url);
     await DatabaseHelper.instance.setSetting('sync_url', u);
   }
 
@@ -166,15 +184,15 @@ class SyncService {
       final me = await c.get(Uri.parse('$url/v1/auth/me'), headers: {
         'Authorization': 'Bearer $token'
       }).timeout(const Duration(seconds: 30));
-      if (me.statusCode == 200) {
-        final memberships = ((jsonDecode(me.body)
-                as Map<String, dynamic>)['memberships'] as Map?) ??
-            const {};
-        final mine = await localCompanyUuid();
-        if (mine == null || !memberships.containsKey(mine)) {
-          throw AppError(
-              'Akaunti hii haina uanachama wa kampuni hii. Mwambie msimamizi wa seva atumie UUID ya kampuni: ${mine ?? '-'}');
-        }
+      if (me.statusCode != 200) {
+        throw AppError(_detail(me));
+      }
+      final meBody = jsonDecode(me.body) as Map<String, dynamic>;
+      final memberships = meBody['memberships'] as Map? ?? const {};
+      final mine = await localCompanyUuid();
+      if (mine == null || !memberships.containsKey(mine)) {
+        throw AppError(
+            'Akaunti hii haina uanachama wa kampuni hii. Mwambie msimamizi wa seva atumie UUID ya kampuni: ${mine ?? '-'}');
       }
       await tokenWriter(token);
     } finally {
@@ -182,7 +200,33 @@ class SyncService {
     }
   }
 
-  static Future<void> logout() => _storage.delete(key: _tokenKey);
+  static Future<void> logout({http.Client? client}) async {
+    final c = client ?? http.Client();
+    try {
+      final token = await tokenProvider();
+      final url = await serverUrl();
+      if (token != null && url != null) {
+        final response = await c
+            .post(
+              Uri.parse('$url/v1/auth/logout'),
+              headers: {'Authorization': 'Bearer $token'},
+            )
+            .timeout(const Duration(seconds: 20));
+        if (response.statusCode != 200) {
+          throw AppError(
+              'Token imeondolewa kwenye kifaa, lakini seva haikuthibitisha kutoka.');
+        }
+      }
+    } catch (error) {
+      await _storage.delete(key: _tokenKey);
+      if (error is AppError) rethrow;
+      throw AppError(
+          'Token imeondolewa kwenye kifaa; seva haikufikiwa ili kuifuta.');
+    } finally {
+      if (client == null) c.close();
+    }
+    await _storage.delete(key: _tokenKey);
+  }
 
   static Future<bool> hasToken() async => (await tokenProvider()) != null;
 

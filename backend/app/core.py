@@ -56,10 +56,11 @@ class User:
     id: str
     memberships: dict  # company_uuid -> role
     device_id: str = ''
+    mine_memberships: dict = field(default_factory=dict)  # company_uuid -> mine UUIDs
 
 
 class RateLimiter:
-    """Dirisha la muda lililo kwenye kumbukumbu (kwa instance moja)."""
+    """Rate limiter ya kumbukumbu kwa unit tests pekee."""
 
     def __init__(self, max_attempts=5, window_seconds=300, clock=time.monotonic):
         self.max, self.window, self.clock = max_attempts, window_seconds, clock
@@ -90,10 +91,22 @@ class MemoryRepo:
     def company_name(self, company_uuid):
         return self.company_names.get(company_uuid)
 
-    def pull_records(self, company_uuid, cursor, limit):
+    def pull_records(self, company_uuid, cursor, limit, mine_uuids=None):
         rows = sorted(
             ((v['seq'], k, v) for k, v in self.records.items() if k[0] == company_uuid and v['seq'] > cursor),
             key=lambda x: x[0])
+        if mine_uuids is not None:
+            rows = [
+                row for row in rows
+                if (
+                    row[1][1] == 'companies'
+                    or (
+                        row[1][1] == 'mines'
+                        and row[1][2] in mine_uuids
+                    )
+                    or row[2]['data'].get('mine_id') in mine_uuids
+                )
+            ]
         more = len(rows) > limit
         rows = rows[:limit]
         out = [{'cursor': s, 'entity': k[1], 'record_uuid': k[2], 'version': v['version'],
@@ -138,7 +151,15 @@ class SyncEngine:
             raise PermissionError('hairuhusiwi kusoma kampuni hii')
         if not hasattr(self.repo, 'pull_records'):
             return {'records': [], 'next_cursor': cursor, 'has_more': False}
-        rows, next_cursor, more = self.repo.pull_records(company_uuid, cursor, min(max(limit, 1), 500))
+        mine_scope = user.mine_memberships.get(company_uuid)
+        if hasattr(self.repo, 'mine_names') and mine_scope is not None:
+            mine_scope = self.repo.mine_names(company_uuid, mine_scope)
+        rows, next_cursor, more = self.repo.pull_records(
+            company_uuid,
+            cursor,
+            min(max(limit, 1), 500),
+            mine_uuids=mine_scope,
+        )
         return {'records': rows, 'next_cursor': next_cursor, 'has_more': more}
 
     def _one(self, user, device_id, ev):
@@ -157,6 +178,10 @@ class SyncEngine:
             return _reject(key, 'data.uuid haiendani na record_uuid')
         if entity == 'companies' and ruuid != company:
             return _reject(key, 'rekodi ya kampuni lazima iwe ya kampuni husika')
+        if entity == 'mines' and (
+            not isinstance(data.get('name'), str) or not data['name'].strip()
+        ):
+            return _reject(key, 'jina la mgodi linahitajika')
         # App inatuma `company_id` kama JINA la kampuni (si uuid): kubali jina lililosajiliwa
         # kwa company_uuid hii au uuid yenyewe; kitu kingine ni jaribio la kuvuka tenant.
         cid = data.get('company_id')
@@ -167,6 +192,15 @@ class SyncEngine:
                 allowed.add(name)
             if str(cid) not in allowed:
                 return _reject(key, 'company_id ya data haiendani na tenant')
+        mine_id = data.get('mine_id')
+        if entity not in ('companies', 'mines') and isinstance(mine_id, str) and mine_id.strip():
+            if hasattr(self.repo, 'resolve_mine'):
+                mine_uuid = self.repo.resolve_mine(company, mine_id.strip())
+                if mine_uuid is None:
+                    return _reject(key, 'mine_id haipo ndani ya kampuni hii')
+                assigned_mines = user.mine_memberships.get(company)
+                if assigned_mines is not None and mine_uuid not in assigned_mines:
+                    return _reject(key, 'jukumu lako haliruhusu kutumia mgodi huu')
         if len(json.dumps(data, ensure_ascii=False, default=str).encode('utf-8')) > 262144:
             return _reject(key, 'rekodi imezidi ukubwa wa 256KB')
         role = user.memberships.get(company)

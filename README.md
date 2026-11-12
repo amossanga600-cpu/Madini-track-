@@ -28,10 +28,16 @@ flutter build apk --debug
 Majaribio ya backend na SQLite:
 
 ```sh
-python3 -m unittest discover -s tools/db_tests
-python3 -m unittest discover -s backend/tests
+python3 -m pip install -r backend/requirements-dev.txt
+PYTHONPATH=backend pytest -q
 python3 -m compileall -q backend tools/db_tests
 ```
+
+Majaribio ya PostgreSQL yanahitaji `TEST_DATABASE_URL` ya database ya majaribio
+ya loopback yenye jina linaloishia au lenye `test`; bila hiyo integration tests
+zinarukwa kwa makusudi. Usitumie URL/credentials za production. Kuanzisha
+backend ya ndani na hatua za production: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+API contract: [`docs/API.md`](docs/API.md).
 
 Hali na mipaka ya uthibitisho imeandikwa katika
 [`docs/TEST_STATUS.md`](docs/TEST_STATUS.md), [`docs/PENDING.md`](docs/PENDING.md)

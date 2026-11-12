@@ -11,11 +11,16 @@ ya unit pekee si uthibitisho wa utayari wa uzalishaji.
   mtumiaji hakuweka nenosiri.
 - Pima muda wa PIN ya PBKDF2 iterations 600,000 na matumizi ya kumbukumbu
   kwenye simu ya kiwango cha chini.
-- Tekeleza API na schema dhidi ya PostgreSQL/Supabase ya staging. Thibitisha
-  tenant isolation, RBAC, push/pull, cursors, idempotency, conflicts na writes
-  zinazofanyika kwa wakati mmoja.
+- Deploy API kwenye PostgreSQL/Supabase ya staging. Local PostgreSQL
+  integration tests sasa zimepita, lakini staging haijatumika. Thibitisha
+  runtime/migration DB roles, TLS, tenant isolation, RBAC, push/pull, cursors,
+  idempotency, conflicts na concurrency.
 - Endesha majaribio ya vifaa viwili na ukaguzi wa batch genealogy kutoka
   uzalishaji hadi mauzo.
+- Jaribu Flutter dhidi ya API iliyodeployiwa kwa HTTPS; build, install na
+  kuzindua APK ya sasa kwenye Android halisi.
+- Fanya PostgreSQL backup/restore drill, thibitisha retention, PITR, RPO/RTO,
+  alerting na access ya recovery.
 - Fanya UAT kwenye mgodi unaoshiriki kwa hiari, bila kutumia rekodi za
   uzalishaji kabla ya kukamilisha restore/recovery tests.
 - Pata review ya usalama huru na ushauri wa kitaalamu kuhusu faragha,
@@ -28,14 +33,16 @@ ya unit pekee si uthibitisho wa utayari wa uzalishaji.
   na audit hash-chain ya simu bado hazipo.
 - Backup ya faili bado inaruhusu payload isiyosimbwa ikiwa nenosiri
   halijawekwa. Weka nenosiri lenye nguvu kabla ya kuhamisha backup.
-- Rate limiter ya backend ni ya instance moja; multi-instance deployment
-  inahitaji limiter ya pamoja au gateway/WAF.
+- Rate limiter ya login huhifadhi counters PostgreSQL na inaweza kushirikiwa
+  na replicas, lakini deployment, proxy client-IP configuration, monitoring na
+  rate-limit tests za hosting bado hazijathibitishwa.
 - Ripoti kamili za biashara/compliance, Excel, filters zote na reconciliation
   ya kina hazijathibitishwa.
 - Baadhi ya maandishi ya Kiingereza bado hayajakamilika; Kiswahili ndicho
   chaguo-msingi, lakini localization yote inahitaji review ya mhariri.
-- RBAC ya backend ina unit tests; hakikisho la kila endpoint linahitaji
-  integration tests za PostgreSQL. UI hiding si mpaka wa usalama.
+- RBAC, tenant/mine isolation na sync zina PostgreSQL integration tests za
+  local container. Review ya endpoints zote na uthibitisho wa staging bado
+  unahitajika; UI hiding si mpaka wa usalama.
 
 ## Mmiliki/matayarisho ya kutolewa
 

@@ -18,9 +18,11 @@ mmiliki/mtoa huduma.
 - 🔑 Release APK/AAB inahitaji production keystore na owner-approved signing.
 - 🟡 Backup ina preview/checksum na restore path; restore halisi na backup
   encrypted lazima zijaribiwe kwenye kifaa.
-- 🔑 PostgreSQL/Supabase: staging URL, credentials, HTTPS domain na
-  integration/concurrency tests zinahitajika.
-- 🟡 Backend unit tests haziwakilishi PostgreSQL, RLS au deployment halisi.
+- 🟡 FastAPI/PostgreSQL local integration tests zimepita (4/4); PostgreSQL
+  staging/Supabase, DB grants/RLS behavior ya provider, HTTPS domain na live
+  Flutter integration bado vinasubiri.
+- 🟡 Backend tests za local container hazithibitishi production deployment,
+  provider-specific RLS, backup/restore au load ya PostgreSQL.
 - ❌ Upload/download ya attachments, certificate pinning na mobile audit
   hash-chain.
 - 🟡 Ripoti za PDF/CSV za msingi zipo; Excel, filters zote na compliance
