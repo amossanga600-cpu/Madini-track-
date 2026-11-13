@@ -214,6 +214,10 @@ class IntegrityTest(unittest.TestCase):
         self.db.execute("INSERT INTO debt_payments(uuid,created_at,company_id,debt_uuid,amount,pay_date) VALUES(?,?,?,?,?,?)", (uid(),'n','C',self.ids['d1'],5,'2026-01-01'))
 
     def test_orphan_report_clean_on_valid_data_and_detects_injected_orphan(self):
+        for version in ('v9', 'v10', 'v11', 'v12'):
+            self.db.executescript(
+                (ROOT / f'docs/migrations/{version}_up.sql').read_text()
+            )
         for name, sql in ORPHANS.items():
             self.assertEqual(self.db.execute(sql).fetchone()[0], 0, name)
         # orphan ya kihistoria (iliyoingizwa kabla ya triggers) lazima igunduliwe

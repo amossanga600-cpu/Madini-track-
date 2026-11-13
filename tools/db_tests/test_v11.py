@@ -70,7 +70,7 @@ class V11Test(unittest.TestCase):
 
     def test_dart_wiring(self):
         dh = (ROOT / 'mobile/lib/database_helper.dart').read_text()
-        self.assertIn('const int kDbVersion = 11;', dh)
+        self.assertIn('const int kDbVersion = 12;', dh)
         self.assertEqual(dh.count('await _migrateToV11(db);'), 2)  # onCreate + onUpgrade
         self.assertIn("import 'migration_v11_sql.dart';", dh)
 

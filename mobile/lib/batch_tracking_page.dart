@@ -255,8 +255,8 @@ class _BatchTrackingPageState extends State<BatchTrackingPage> {
                               if (v == 'merge') _merge(b);
                               if (v == 'history') _history(b);
                               if (v == 'photo') {
-                                showAttachSheet(
-                                    context, 'ore_batches', b['uuid'] as String);
+                                showAttachSheet(context, 'ore_batches',
+                                    b['uuid'] as String);
                               }
                             },
                             itemBuilder: (_) => [

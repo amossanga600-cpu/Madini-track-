@@ -1,7 +1,12 @@
 import 'dart:io';
+import 'dart:convert';
 
+import 'package:crypto/crypto.dart' as crypto;
+import 'package:cryptography/cryptography.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:madini_tracker/backup_service.dart';
 import 'package:madini_tracker/db_encryption.dart';
+import 'package:madini_tracker/utils.dart';
 
 void main() {
   test('ufunguo wa database ni bits 256 za hex na hutofautiana', () {
@@ -119,5 +124,49 @@ void main() {
       DbEncryption.keyWriter = originalWriter;
       await directory.delete(recursive: true);
     }
+  });
+
+  test('backup mpya inahitaji password yenye urefu wa chini', () async {
+    await expectLater(
+      BackupService.createBackupFile(password: 'short'),
+      throwsA(isA<AppError>()),
+    );
+  });
+
+  test('backup iliyosimbwa hufunguka kwa nywila sahihi pekee', () async {
+    const json = '{"tables":{"ore_batches":[{"uuid":"batch-1"}]}}';
+    const password = 'backup-password-12';
+    final salt = List<int>.generate(16, (index) => index);
+    final key = await Pbkdf2(
+      macAlgorithm: Hmac.sha256(),
+      iterations: 10000,
+      bits: 256,
+    ).deriveKeyFromPassword(password: password, nonce: salt);
+    final box = await AesGcm.with256bits().encrypt(
+      utf8.encode(json),
+      secretKey: key,
+    );
+    final envelope = jsonEncode({
+      'format': BackupService.format,
+      'format_version': 1,
+      'schema_version': 12,
+      'created_at': '2026-01-01T00:00:00Z',
+      'sha256': crypto.sha256.convert(utf8.encode(json)).toString(),
+      'encrypted': true,
+      'kdf': {
+        'name': 'pbkdf2-hmac-sha256',
+        'iterations': 10000,
+        'salt': base64Encode(salt),
+      },
+      'payload': base64Encode(box.concatenation()),
+    });
+
+    final preview = await BackupService.inspect(envelope, password: password);
+    expect(preview.encrypted, isTrue);
+    expect(preview.counts['ore_batches'], 1);
+    await expectLater(
+      BackupService.inspect(envelope, password: 'wrong-password-12'),
+      throwsA(isA<AppError>()),
+    );
   });
 }

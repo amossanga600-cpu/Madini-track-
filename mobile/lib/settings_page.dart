@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 import 'app_context.dart';
 import 'backup_service.dart';
@@ -107,38 +106,11 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _backup() async {
-    final json = await _db.exportBackupJson();
-    await Clipboard.setData(ClipboardData(text: json));
-    if (!mounted) return;
-    final big = json.length > 800000;
-    snack(
-      context,
-      big
-          ? 'Backup imenakiliwa, lakini ni kubwa (${(json.length / 1024).round()} KB). '
-              'Simu zingine zinaweza kushindwa kuishikilia; hifadhi kwa vipande ukiona tatizo.'
-          : 'Backup imenakiliwa (${(json.length / 1024).round()} KB). '
-              'Ibandike kwenye barua pepe au ujumbe wa kujitumia.',
-    );
+    await _backupFile();
   }
 
   Future<void> _restore() async {
-    final ok = await showSpecSheet(
-      context,
-      title: 'Rejesha Backup',
-      note:
-          'ONYO: Data yote ya sasa kwenye simu hii itabadilishwa na ya backup.',
-      fields: const [
-        FSpec('json', 'Bandika maandishi ya backup hapa',
-            type: FType.multiline),
-      ],
-      submitLabel: 'Rejesha',
-      onSubmit: (v) => _db.restoreBackupJson(v['json']!),
-    );
-    if (ok) {
-      if (!mounted) return;
-      snack(context, 'Backup imerejeshwa.');
-      setState(() {});
-    }
+    await _restoreFile();
   }
 
   Future<void> _backupFile() async {
@@ -147,19 +119,23 @@ class _SettingsPageState extends State<SettingsPage> {
       context,
       title: 'Backup ya Faili',
       note:
-          'Nywila ni ya hiari. Ukiiweka, faili litasimbwa (AES-256) na LITAHITAJI nywila hiyo kurejesha. '
-          'Ukisahau nywila, backup haiwezi kufunguliwa.',
+          'Faili litasimbwa kwa AES-256-GCM na litahitaji nywila hii kurejesha. '
+          'Tumia angalau herufi 12 na ihifadhi tofauti na faili; ukisahau nywila, backup haiwezi kufunguliwa.',
       fields: const [
-        FSpec('password', 'Nywila ya backup (si lazima)', required: false)
+        FSpec('password', 'Nywila ya backup', type: FType.password)
       ],
       submitLabel: 'Tengeneza',
       onSubmit: (v) async {
-        password = v['password'];
+        final value = v['password']!.trim();
+        if (value.length < 12) {
+          throw AppError('Nywila ya backup iwe na angalau herufi 12.');
+        }
+        password = value;
       },
     );
     if (!ok) return;
     try {
-      final file = await BackupService.createBackupFile(password: password);
+      final file = await BackupService.createBackupFile(password: password!);
       await Share.shareXFiles([XFile(file.path)], text: 'Madini Track backup');
       if (mounted) snack(context, 'Backup imehifadhiwa: ${file.path}');
     } catch (e) {
@@ -186,7 +162,7 @@ class _SettingsPageState extends State<SettingsPage> {
         final ok = await showSpecSheet(
           context,
           title: 'Nywila ya Backup',
-          fields: const [FSpec('password', 'Nywila')],
+          fields: const [FSpec('password', 'Nywila', type: FType.password)],
           submitLabel: 'Fungua',
           onSubmit: (v) async {
             password = v['password'];
@@ -207,7 +183,35 @@ class _SettingsPageState extends State<SettingsPage> {
         yes: 'Rejesha',
       );
       if (!yes) return;
-      final snap = await BackupService.restore(p);
+      var snapshotPassword = password;
+      if (snapshotPassword == null) {
+        if (!mounted) return;
+        final snapshotOk = await showSpecSheet(
+          context,
+          title: 'Nywila ya Snapshot',
+          note: 'Snapshot ya data ya sasa itasimbwa kabla ya kurejesha.',
+          fields: const [
+            FSpec(
+              'password',
+              'Nywila mpya (angalau herufi 12)',
+              type: FType.password,
+            )
+          ],
+          submitLabel: 'Endelea',
+          onSubmit: (v) async {
+            final value = v['password']!.trim();
+            if (value.length < 12) {
+              throw AppError('Nywila iwe na angalau herufi 12.');
+            }
+            snapshotPassword = value;
+          },
+        );
+        if (!snapshotOk) return;
+      }
+      final snap = await BackupService.restore(
+        p,
+        snapshotPassword: snapshotPassword!,
+      );
       if (!mounted) return;
       snack(context, 'Imerejeshwa. Snapshot ya awali: ${snap?.path ?? '-'}');
       setState(() {});
@@ -355,7 +359,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   leading: const Icon(Icons.save_alt),
                   title: const Text('Backup ya Faili (inapendekezwa)'),
                   subtitle: const Text(
-                      'Faili lenye checksum, nywila ya hiari na kushiriki.'),
+                      'Faili husimbwa kwa nywila; snapshot ya restore husimbwa pia.'),
                   onTap: _backupFile,
                 ),
                 ListTile(
@@ -367,9 +371,9 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 ListTile(
                   leading: const Icon(Icons.backup_outlined),
-                  title: const Text('Tengeneza Backup'),
-                  subtitle:
-                      const Text('Inanakili data yote kama maandishi (JSON).'),
+                  title: const Text('Tengeneza Backup Iliyosimbwa'),
+                  subtitle: const Text(
+                      'Shiriki faili lililosimbwa kwa nenosiri lenye nguvu.'),
                   onTap: _backup,
                 ),
                 ListTile(

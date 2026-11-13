@@ -295,6 +295,25 @@ void main() {
     expect(src.single['batch_id'], 'B-4');
   });
 
+  test('traceability haivuki kwenda mgodi mwingine wa kampuni', () async {
+    await db.addMine(company: 'Kampuni A', name: 'Mgodi 2');
+    AppCtx.mine = 'Mgodi 2';
+    await db.recordProduction(
+      shaft: 'S2',
+      batchId: 'B-MINE-2',
+      shiftDate: '2026-01-03',
+      shiftType: 'Mchana',
+      bags: 1,
+      weightKg: 10,
+    );
+    final otherMineBatch = (await db.expenseBatchOptions()).single;
+
+    AppCtx.mine = 'Mgodi 1';
+    final trace = await db.batchTrace(otherMineBatch['uuid'] as String);
+    expect(trace['batch'], isEmpty);
+    expect(trace['production'], isEmpty);
+  });
+
   test('madeni yaliyofika due date yanaonekana kwenye debtsDue', () async {
     final d = await db.database;
     await d.insert('debts', {

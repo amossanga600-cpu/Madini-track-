@@ -1,6 +1,7 @@
 """Real FastAPI + PostgreSQL integration tests (no mocked repository)."""
 
 import os
+import json
 import unittest
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -192,6 +193,7 @@ class PostgreSQLApiIntegrationTests(unittest.TestCase):
         }
         production_data = {
             'uuid': production_uuid,
+            'batch_uuid': batch_uuid,
             'company_id': 'Kampuni A',
             'mine_id': 'Mgodi Alpha',
             'batch_id': batch_id,
@@ -285,7 +287,7 @@ class PostgreSQLApiIntegrationTests(unittest.TestCase):
                 )
 
         trace = self.client.get(
-            f'/v1/batches/{batch_id}/trace?company_uuid={self.company_a}',
+            f'/v1/batches/{batch_uuid}/trace?company_uuid={self.company_a}',
             headers=self.auth(self.token_a),
         )
         self.assertEqual(trace.status_code, 200, trace.text)
@@ -294,6 +296,55 @@ class PostgreSQLApiIntegrationTests(unittest.TestCase):
             trace.json()['related']['production_records'][0]['record_uuid'],
             production_uuid,
         )
+        duplicate_uuid = _uuid()
+        duplicate_event = _event(
+            self.company_a,
+            'ore_batches',
+            duplicate_uuid,
+            dict(batch_data, uuid=duplicate_uuid),
+        )
+        rejected_batch = self.push(self.token_a, self.device_a, duplicate_event)
+        self.assertEqual(rejected_batch.json()['results'][0]['status'], 'rejected')
+
+        other_mine_batch_uuid = _uuid()
+        other_mine_batch = _event(
+            self.company_a,
+            'ore_batches',
+            other_mine_batch_uuid,
+            dict(batch_data, uuid=other_mine_batch_uuid, mine_id='Mgodi Beta'),
+        )
+        rejected_other_mine = self.push(
+            self.token_a, self.device_a, other_mine_batch
+        )
+        self.assertEqual(
+            rejected_other_mine.json()['results'][0]['status'], 'rejected'
+        )
+        with self.repo._conn() as connection:
+            connection.execute(
+                """
+                INSERT INTO sync_records
+                  (company_id,entity,record_uuid,version,data,device_id,updated_by)
+                VALUES (%s,'ore_batches',%s,1,%s,%s,%s)
+                """,
+                (
+                    self.company_a,
+                    other_mine_batch_uuid,
+                    json.dumps(
+                        dict(
+                            batch_data,
+                            uuid=other_mine_batch_uuid,
+                            mine_id='Mgodi Beta',
+                        )
+                    ),
+                    self.device_a,
+                    self.owner_a['user_id'],
+                ),
+            )
+        ambiguous_label = self.client.get(
+            f'/v1/batches/{batch_id}/trace?company_uuid={self.company_a}',
+            headers=self.auth(self.token_a),
+        )
+        self.assertEqual(ambiguous_label.status_code, 409, ambiguous_label.text)
 
         scoped_user = self.client.post(
             '/v1/admin/users',
@@ -323,6 +374,11 @@ class PostgreSQLApiIntegrationTests(unittest.TestCase):
             headers=self.auth(operator_token),
         )
         self.assertEqual(forbidden_audit.status_code, 403)
+        hidden_trace = self.client.get(
+            f'/v1/batches/{other_mine_batch_uuid}/trace?company_uuid={self.company_a}',
+            headers=self.auth(operator_token),
+        )
+        self.assertEqual(hidden_trace.status_code, 404)
 
     def test_concurrent_duplicate_delivery_is_applied_once(self):
         mine_uuid = self.add_mine(

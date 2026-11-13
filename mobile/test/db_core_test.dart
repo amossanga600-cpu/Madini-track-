@@ -9,7 +9,6 @@ import 'package:madini_tracker/database_helper.dart';
 import 'package:madini_tracker/db_modules.dart';
 import 'package:madini_tracker/db_reports.dart';
 import 'package:madini_tracker/db_v8.dart';
-import 'package:madini_tracker/migration_v11_sql.dart';
 import 'package:madini_tracker/sync_service.dart';
 import 'package:madini_tracker/utils.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -49,9 +48,9 @@ void main() {
       bags: 5,
       weightKg: kg);
 
-  test('foreign keys zimewashwa na schema ni v11', () async {
+  test('foreign keys zimewashwa na schema ni v12', () async {
     final d = await db.database;
-    expect(await d.getVersion(), 11);
+    expect(await d.getVersion(), 12);
     final r = await db.integrityReport();
     expect(r['foreign_keys_on'], 1);
     expect(r['foreign_key_violations'], 0);
@@ -59,21 +58,57 @@ void main() {
 
   test('upgrade huhifadhi nakala ya database kabla ya migration', () async {
     final d = await db.database;
-    for (final statement in kV11Statements.reversed) {
-      final column =
-          RegExp(r'ADD COLUMN (\w+)').firstMatch(statement)!.group(1)!;
-      await d.execute('ALTER TABLE safety_incidents DROP COLUMN $column');
+    for (final trigger in [
+      'production_batch_uuid_insert',
+      'production_batch_uuid_update',
+      'ore_batch_uuid_immutable',
+      'batch_movement_uuid_insert',
+      'batch_movement_uuid_update',
+      'processing_batch_uuid_insert',
+      'processing_batch_uuid_update',
+      'gold_inventory_batch_uuid_insert',
+      'gold_inventory_batch_uuid_update',
+      'gold_allocation_batch_uuid_insert',
+      'gold_allocation_batch_uuid_update',
+    ]) {
+      await d.execute('DROP TRIGGER $trigger');
     }
-    await d.setVersion(10);
+    for (final index in [
+      'idx_production_batch_uuid',
+      'idx_movement_batch_uuid',
+      'idx_movement_parent_uuid',
+      'idx_movement_child_uuid',
+      'idx_processing_batch_uuid',
+      'idx_gold_batch_uuid',
+      'idx_allocation_batch_uuid',
+    ]) {
+      await d.execute('DROP INDEX $index');
+    }
+    await d.execute('DROP VIEW v_mass_balance');
+    await d.execute('DROP TABLE batch_traceability_issues');
+    for (final tableAndColumn in [
+      ('production_records', 'batch_uuid'),
+      ('batch_movements', 'mine_id'),
+      ('batch_movements', 'batch_uuid'),
+      ('batch_movements', 'parent_batch_uuid'),
+      ('batch_movements', 'child_batch_uuid'),
+      ('processing_records', 'batch_uuid'),
+      ('gold_inventory', 'batch_uuid'),
+      ('gold_sale_allocations', 'batch_uuid'),
+    ]) {
+      await d.execute(
+          'ALTER TABLE ${tableAndColumn.$1} DROP COLUMN ${tableAndColumn.$2}');
+    }
+    await d.setVersion(11);
     await db.close();
 
     final upgraded = await db.database;
-    expect(await upgraded.getVersion(), 11);
-    final backup = File('${tmp.path}/madini_local.db.pre-v11.bak');
+    expect(await upgraded.getVersion(), 12);
+    final backup = File('${tmp.path}/madini_local.db.pre-v12.bak');
     expect(await backup.exists(), isTrue);
     final probe = await openReadOnlyDatabase(backup.path);
     try {
-      expect(await probe.getVersion(), 10);
+      expect(await probe.getVersion(), 11);
       expect(await probe.query('companies'), isNotEmpty);
     } finally {
       await probe.close();

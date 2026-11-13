@@ -17,7 +17,11 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, field_validator
 
 from .core import SyncEngine, User, has_permission, validate_jwt_secret
-from .db import PostgresRepo
+from .db import (
+    AmbiguousBatchIdentifier,
+    BatchGenealogyTooLarge,
+    PostgresRepo,
+)
 
 JWT_SECRET = validate_jwt_secret(os.environ.get('JWT_SECRET', ''))
 DATABASE_URL = os.environ.get('DATABASE_URL', '')
@@ -402,24 +406,23 @@ def batch_trace(identifier: str, company_uuid: uuid.UUID,
     if role is None or not has_permission(role, 'sync:read'):
         raise HTTPException(403, 'hairuhusiwi kuona kampuni hii')
     assigned = user.mine_memberships.get(company_id)
-    if assigned is not None:
+    try:
         trace = repo.batch_genealogy(
             company_id, identifier, mine_uuids=assigned
         )
-        visible_mines = {
-            record['data'].get('mine_id')
-            for record in trace['batches']
-            if record['data'].get('mine_id') is not None
-        }
-        trace_mines = {
-            name for name in (
-                repo.resolve_mine(company_id, value) for value in visible_mines
-            ) if name in assigned
-        }
-        if not trace_mines:
-            raise HTTPException(404, 'Batch haipo kwenye migodi uliyopewa')
-        return trace
-    return repo.batch_genealogy(company_id, identifier)
+    except AmbiguousBatchIdentifier:
+        raise HTTPException(
+            409,
+            'Batch ID hii inatumika zaidi ya mara moja; tumia UUID ya Batch.',
+        )
+    except BatchGenealogyTooLarge:
+        raise HTTPException(
+            413,
+            'Genealogy ni kubwa kuliko kikomo; tafuta UUID ya hatua maalumu.',
+        )
+    if not trace['batches']:
+        raise HTTPException(404, 'Batch haipo kwenye kampuni au migodi uliyopewa')
+    return trace
 
 
 @app.post('/v1/admin/users')

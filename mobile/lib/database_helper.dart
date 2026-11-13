@@ -8,18 +8,19 @@ import 'migration_v8_sql.dart';
 import 'migration_v9_sql.dart';
 import 'migration_v10_sql.dart';
 import 'migration_v11_sql.dart';
+import 'migration_v12_sql.dart';
 import 'utils.dart';
 
-/// Toleo la database v11: v10 + ajali/usalama ya kiufundi (safu additive).
-const int kDbVersion = 11;
+/// Toleo la database v12: mahusiano ya Batch kwa UUID (migration additive).
+const int kDbVersion = 12;
 
 /// Majedwali yote yanayoingia kwenye Backup / Restore.
 const List<String> kBackupTables = [
   'app_settings',
   'companies',
   'mines',
-  'production_records',
   'ore_batches',
+  'production_records',
   'batch_movements',
   'processing_records',
   'workers',
@@ -34,6 +35,7 @@ const List<String> kBackupTables = [
   'audit_log',
   'gold_inventory',
   'gold_sale_allocations',
+  'batch_traceability_issues',
   'attachments',
   'tax_rates',
   'safety_incidents',
@@ -247,7 +249,7 @@ class DatabaseHelper {
 
     await _backupBeforeUpgrade(path, password: key);
 
-    return openDatabase(
+    final database = await openDatabase(
       path,
       password: key,
       version: kDbVersion,
@@ -255,6 +257,13 @@ class DatabaseHelper {
       onCreate: _createDB,
       onUpgrade: _upgradeDB,
     );
+    try {
+      await DbEncryption.verifyAndFinalizeMigration(path, database);
+      return database;
+    } catch (_) {
+      await database.close();
+      rethrow;
+    }
   }
 
   Future<void> _onConfigure(Database db) async {
@@ -270,23 +279,23 @@ class DatabaseHelper {
     String? password,
     DatabaseFactory? factory,
   }) async {
+    final f = File(path);
+    if (!await f.exists()) return;
+    final probe = factory != null
+        ? await factory.openDatabase(
+            path,
+            options: OpenDatabaseOptions(readOnly: true),
+          )
+        : await openReadOnlyDatabase(path, password: password);
+    late final int version;
     try {
-      final f = File(path);
-      if (!await f.exists()) return;
-      final probe = factory != null
-          ? await factory.openDatabase(
-              path,
-              options: OpenDatabaseOptions(readOnly: true),
-            )
-          : await openReadOnlyDatabase(path, password: password);
-      final v = await probe.getVersion();
+      version = await probe.getVersion();
+    } finally {
       await probe.close();
-      if (v > 0 && v < kDbVersion) {
-        final bak = File('$path.pre-v$kDbVersion.bak');
-        if (!await bak.exists()) await f.copy(bak.path);
-      }
-    } catch (_) {
-      // Migration transaction bado hulinda schema; open ya kawaida itaonyesha hitilafu.
+    }
+    if (version > 0 && version < kDbVersion) {
+      final backup = File('$path.pre-v$kDbVersion.bak');
+      if (!await backup.exists()) await f.copy(backup.path);
     }
   }
 
@@ -300,6 +309,7 @@ class DatabaseHelper {
     await _migrateToV9(db);
     await _migrateToV10(db);
     await _migrateToV11(db);
+    await _migrateToV12(db);
   }
 
   Future<void> _createProductionTable(Database db) async {
@@ -465,6 +475,9 @@ class DatabaseHelper {
     if (oldVersion < 11) {
       await _migrateToV11(db);
     }
+    if (oldVersion < 12) {
+      await _migrateToV12(db);
+    }
   }
 
   /// Schema v8. Inaendeshwa ndani ya transaction ya sqflite (onCreate/onUpgrade),
@@ -492,6 +505,13 @@ class DatabaseHelper {
   /// Schema v11: safu za ajali/usalama ya kiufundi (additive).
   Future<void> _migrateToV11(Database db) async {
     for (final s in kV11Statements) {
+      await db.execute(s);
+    }
+  }
+
+  /// Schema v12: huunganisha hatua za traceability kwa UUID na kuhifadhi orphans.
+  Future<void> _migrateToV12(Database db) async {
+    for (final s in kV12Statements) {
       await db.execute(s);
     }
   }
@@ -1300,6 +1320,21 @@ class DatabaseHelper {
       }
 
       final pm = meta();
+      final bm = meta();
+      pm['batch_uuid'] = bm['uuid'];
+      await txn.insert('ore_batches', {
+        ...bm,
+        'company_id': AppCtx.company,
+        'mine_id': AppCtx.mine,
+        'batch_id': batchId,
+        'source_location': shaft,
+        'current_location': shaft,
+        'weight_kg': weightKg,
+        'initial_weight_kg': weightKg,
+        'weight_initial_kg': weightKg,
+        'source_production_uuid': pm['uuid'],
+        'status': 'Imechimbwa',
+      });
       await txn.insert('production_records', {
         ...pm,
         'company_id': AppCtx.company,
@@ -1316,20 +1351,6 @@ class DatabaseHelper {
         'witness_user_uuid': witnessUserUuid,
         'witness_verified': witnessUserUuid == null ? 0 : 1,
         'voided': 0,
-      });
-
-      await txn.insert('ore_batches', {
-        ...meta(),
-        'company_id': AppCtx.company,
-        'mine_id': AppCtx.mine,
-        'batch_id': batchId,
-        'source_location': shaft,
-        'current_location': shaft,
-        'weight_kg': weightKg,
-        'initial_weight_kg': weightKg,
-        'weight_initial_kg': weightKg,
-        'source_production_uuid': pm['uuid'],
-        'status': 'Imechimbwa',
       });
 
       await writeAudit(
@@ -1373,21 +1394,27 @@ class DatabaseHelper {
 
       final cid = r['company_id'] as String;
       final bid = r['batch_id'] as String;
+      final batchUuid = r['batch_uuid'] as String?;
+      if (batchUuid == null || batchUuid.isEmpty) {
+        throw AppError(
+            'Batch haina kiungo cha UUID; rekodi imehifadhiwa kwa ukaguzi.');
+      }
 
       final mv = Sqflite.firstIntValue(await txn.rawQuery(
               'SELECT COUNT(*) FROM batch_movements '
-              'WHERE company_id = ? AND batch_id = ?',
-              [cid, bid])) ??
+              'WHERE company_id = ? AND (batch_uuid = ? OR parent_batch_uuid = ? '
+              'OR child_batch_uuid = ?)',
+              [cid, batchUuid, batchUuid, batchUuid])) ??
           0;
       final pr = Sqflite.firstIntValue(await txn.rawQuery(
               'SELECT COUNT(*) FROM processing_records '
-              'WHERE company_id = ? AND batch_id = ? AND voided = 0',
-              [cid, bid])) ??
+              'WHERE company_id = ? AND batch_uuid = ? AND voided = 0',
+              [cid, batchUuid])) ??
           0;
       final ch = Sqflite.firstIntValue(await txn.rawQuery(
               'SELECT COUNT(*) FROM ore_batches '
-              'WHERE company_id = ? AND parent_batch_id = ?',
-              [cid, bid])) ??
+              'WHERE company_id = ? AND parent_batch_uuid = ?',
+              [cid, batchUuid])) ??
           0;
       if (mv + pr + ch > 0) {
         throw AppError(
@@ -1404,8 +1431,8 @@ class DatabaseHelper {
       await txn.update(
         'ore_batches',
         {'status': 'Imefutwa', 'weight_kg': 0.0, 'sync_status': 'Pending'},
-        where: 'company_id = ? AND batch_id = ?',
-        whereArgs: [cid, bid],
+        where: 'company_id = ? AND uuid = ?',
+        whereArgs: [cid, batchUuid],
       );
       // Hifadhi historia: Batch ID ya asili inahamia `original_batch_id`, UUID
       // hazibadiliki, na ID inaweza kutumika tena bila kuvunja UNIQUE.
@@ -1493,6 +1520,17 @@ class DatabaseHelper {
     return rows.isEmpty ? null : rows.first;
   }
 
+  Future<Map<String, dynamic>?> getBatchByUuid(String batchUuid) async {
+    final db = await database;
+    final rows = await db.query(
+      'ore_batches',
+      where: 'company_id = ? AND uuid = ?',
+      whereArgs: [AppCtx.company, batchUuid],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : rows.first;
+  }
+
   /// Kusajili Batch kwa mkono (mfano ore iliyonunuliwa au kuhamishwa kutoka nje).
   Future<void> registerBatch({
     required String batchId,
@@ -1557,8 +1595,8 @@ class DatabaseHelper {
     return db.transaction<String>((txn) async {
       final rows = await txn.query(
         'ore_batches',
-        where: 'company_id = ? AND batch_id = ?',
-        whereArgs: [AppCtx.company, batchId],
+        where: 'company_id = ? AND mine_id = ? AND batch_id = ?',
+        whereArgs: [AppCtx.company, AppCtx.mine, batchId],
         limit: 1,
       );
       if (rows.isEmpty) throw AppError('Batch haijapatikana.');
@@ -1590,7 +1628,9 @@ class DatabaseHelper {
         await txn.insert('batch_movements', {
           ...meta(),
           'company_id': AppCtx.company,
+          'mine_id': batch['mine_id'],
           'batch_id': batchId,
+          'batch_uuid': batch['uuid'],
           'from_location': fromLocation,
           'to_location': toLocation.trim(),
           'weight_kg': weightKg,
@@ -1606,14 +1646,14 @@ class DatabaseHelper {
             'status': newStatus,
             'sync_status': 'Pending',
           },
-          where: 'company_id = ? AND batch_id = ?',
-          whereArgs: [AppCtx.company, batchId],
+          where: 'company_id = ? AND uuid = ?',
+          whereArgs: [AppCtx.company, batch['uuid']],
         );
       } else {
         var n = (Sqflite.firstIntValue(await txn.rawQuery(
                   'SELECT COUNT(*) FROM ore_batches '
-                  'WHERE company_id = ? AND parent_batch_id = ?',
-                  [AppCtx.company, batchId],
+                  'WHERE company_id = ? AND parent_batch_uuid = ?',
+                  [AppCtx.company, batch['uuid']],
                 )) ??
                 0) +
             1;
@@ -1622,16 +1662,17 @@ class DatabaseHelper {
           n++;
           childId = '$batchId-S$deviceTag-$n';
         }
+        final child = meta();
 
         await txn.update(
           'ore_batches',
           {'weight_kg': available - weightKg, 'sync_status': 'Pending'},
-          where: 'company_id = ? AND batch_id = ?',
-          whereArgs: [AppCtx.company, batchId],
+          where: 'company_id = ? AND uuid = ?',
+          whereArgs: [AppCtx.company, batch['uuid']],
         );
 
         await txn.insert('ore_batches', {
-          ...meta(),
+          ...child,
           'company_id': AppCtx.company,
           'mine_id': batch['mine_id'],
           'batch_id': childId,
@@ -1649,8 +1690,11 @@ class DatabaseHelper {
         await txn.insert('batch_movements', {
           ...meta(),
           'company_id': AppCtx.company,
+          'mine_id': batch['mine_id'],
           'batch_id': batchId,
+          'batch_uuid': batch['uuid'],
           'child_batch_id': childId,
+          'child_batch_uuid': child['uuid'],
           'from_location': fromLocation,
           'to_location': toLocation.trim(),
           'weight_kg': weightKg,
@@ -1662,7 +1706,10 @@ class DatabaseHelper {
         await txn.insert('batch_movements', {
           ...meta(),
           'company_id': AppCtx.company,
+          'mine_id': batch['mine_id'],
           'batch_id': childId,
+          'batch_uuid': child['uuid'],
+          'parent_batch_uuid': batch['uuid'],
           'from_location': fromLocation,
           'to_location': toLocation.trim(),
           'weight_kg': weightKg,
@@ -1735,9 +1782,7 @@ class DatabaseHelper {
         0,
         (total, source) => total + dbl(source['weight_kg']),
       );
-      final parent = sources.first;
-      final parentBatchId = parent['batch_id'] as String;
-      final parentUuid = parent['uuid'] as String;
+      final sourceLocation = sources.first['source_location'];
       var targetBatchId = '';
       var targetUuid = '';
       do {
@@ -1752,15 +1797,15 @@ class DatabaseHelper {
         'company_id': AppCtx.company,
         'mine_id': AppCtx.mine,
         'batch_id': targetBatchId,
-        'source_location': parent['source_location'],
+        'source_location': sourceLocation,
         'current_location': location,
         'weight_kg': totalWeight,
         'initial_weight_kg': totalWeight,
         'weight_initial_kg': totalWeight,
         'status': 'Imehamishwa',
-        'parent_batch_id': parentBatchId,
-        'parent_batch_uuid': parentUuid,
-        'source_production_uuid': parent['source_production_uuid'],
+        'parent_batch_id': null,
+        'parent_batch_uuid': null,
+        'source_production_uuid': null,
       });
 
       final movedAt = nowIso();
@@ -1795,8 +1840,11 @@ class DatabaseHelper {
         await txn.insert('batch_movements', {
           ...meta(),
           'company_id': AppCtx.company,
+          'mine_id': source['mine_id'],
           'batch_id': sourceId,
+          'batch_uuid': sourceUuid,
           'child_batch_id': targetBatchId,
+          'child_batch_uuid': targetUuid,
           'from_location': source['current_location'],
           'to_location': location,
           'weight_kg': sourceWeight,
@@ -1809,7 +1857,10 @@ class DatabaseHelper {
         await txn.insert('batch_movements', {
           ...meta(),
           'company_id': AppCtx.company,
+          'mine_id': source['mine_id'],
           'batch_id': targetBatchId,
+          'batch_uuid': targetUuid,
+          'parent_batch_uuid': sourceUuid,
           'from_location': source['current_location'],
           'to_location': location,
           'weight_kg': sourceWeight,
@@ -1837,10 +1888,14 @@ class DatabaseHelper {
 
   Future<List<Map<String, dynamic>>> getBatchHistory(String batchId) async {
     final db = await database;
+    final batch = await getBatch(batchId);
+    if (batch == null) return [];
+    final batchUuid = batch['uuid'] as String;
     return db.query(
       'batch_movements',
-      where: 'company_id = ? AND batch_id = ?',
-      whereArgs: [AppCtx.company, batchId],
+      where: 'company_id = ? AND (batch_uuid = ? OR parent_batch_uuid = ? '
+          'OR child_batch_uuid = ?)',
+      whereArgs: [AppCtx.company, batchUuid, batchUuid, batchUuid],
       orderBy: 'id DESC',
     );
   }
@@ -1850,26 +1905,28 @@ class DatabaseHelper {
   // -------------------------------------------------------------------------
   Future<double?> estimatedGradeForBatch(String batchId) async {
     final db = await database;
-    var current = batchId;
+    final batch = await getBatch(batchId);
+    if (batch == null) return null;
+    var currentUuid = batch['uuid'] as String;
     for (var i = 0; i < 12; i++) {
       final p = await db.query(
         'production_records',
         columns: ['estimated_grade'],
-        where: 'company_id = ? AND batch_id = ? AND voided = 0',
-        whereArgs: [AppCtx.company, current],
+        where: 'company_id = ? AND batch_uuid = ? AND voided = 0',
+        whereArgs: [AppCtx.company, currentUuid],
         limit: 1,
       );
       if (p.isNotEmpty) return (p.first['estimated_grade'] as num?)?.toDouble();
 
       final b = await db.query(
         'ore_batches',
-        columns: ['parent_batch_id'],
-        where: 'company_id = ? AND batch_id = ?',
-        whereArgs: [AppCtx.company, current],
+        columns: ['parent_batch_uuid'],
+        where: 'company_id = ? AND uuid = ?',
+        whereArgs: [AppCtx.company, currentUuid],
         limit: 1,
       );
-      if (b.isEmpty || b.first['parent_batch_id'] == null) return null;
-      current = b.first['parent_batch_id'] as String;
+      if (b.isEmpty || b.first['parent_batch_uuid'] == null) return null;
+      currentUuid = b.first['parent_batch_uuid'] as String;
     }
     return null;
   }
@@ -1906,8 +1963,8 @@ class DatabaseHelper {
     return db.transaction<String>((txn) async {
       final batches = await txn.query(
         'ore_batches',
-        where: 'company_id = ? AND batch_id = ?',
-        whereArgs: [AppCtx.company, batchId],
+        where: 'company_id = ? AND mine_id = ? AND batch_id = ?',
+        whereArgs: [AppCtx.company, AppCtx.mine, batchId],
         limit: 1,
       );
       if (batches.isEmpty) throw AppError('Batch haijapatikana.');
@@ -1932,6 +1989,7 @@ class DatabaseHelper {
         'company_id': AppCtx.company,
         'mine_id': batch['mine_id'],
         'batch_id': batchId,
+        'batch_uuid': batch['uuid'],
         'ore_processed_kg': oreProcessedKg,
         'gold_recovered_g': goldRecoveredG,
         'tailings_kg': tailingsKg,
@@ -1953,6 +2011,7 @@ class DatabaseHelper {
           'mine_id': batch['mine_id'],
           'processing_uuid': pm['uuid'],
           'batch_id': batchId,
+          'batch_uuid': batch['uuid'],
           'grams_initial': goldRecoveredG,
           'grams_available': goldRecoveredG,
           'purity_percent': purityPercent,
@@ -1972,8 +2031,8 @@ class DatabaseHelper {
           'status': done ? 'Imechakatwa' : 'Inaendelea kuchakatwa',
           'sync_status': 'Pending',
         },
-        where: 'company_id = ? AND batch_id = ?',
-        whereArgs: [AppCtx.company, batchId],
+        where: 'company_id = ? AND uuid = ?',
+        whereArgs: [AppCtx.company, batch['uuid']],
       );
 
       if (processingCost > 0) {
@@ -1984,6 +2043,7 @@ class DatabaseHelper {
           amount: processingCost,
           date: processingDate,
           description: 'Uchakataji wa Batch $batchId',
+          batchUuid: batch['uuid'] as String,
           source: 'Uchakataji',
           sourceUuid: pm['uuid'] as String,
         );
@@ -2003,17 +2063,27 @@ class DatabaseHelper {
 
   Future<List<Map<String, dynamic>>> getProcessingRecords({
     String? batchId,
+    String? batchUuid,
     String? from,
     String? to,
     bool allMines = false,
   }) async {
     final db = await database;
     final dc = dateClause('processing_date', from, to);
+    String? resolvedBatchUuid = batchUuid;
+    if (resolvedBatchUuid == null && batchId != null) {
+      resolvedBatchUuid = (await getBatch(batchId))?['uuid'] as String?;
+    }
+    if (batchId != null && resolvedBatchUuid == null) return [];
     return db.rawQuery(
       'SELECT * FROM processing_records WHERE ${scopeWhere(allMines)}'
-      '${batchId == null ? '' : ' AND batch_id = ?'}'
+      '${resolvedBatchUuid == null ? '' : ' AND batch_uuid = ?'}'
       '${dc.sql} ORDER BY processing_date DESC, id DESC',
-      [...scopeArgs(allMines), if (batchId != null) batchId, ...dc.args],
+      [
+        ...scopeArgs(allMines),
+        if (resolvedBatchUuid != null) resolvedBatchUuid,
+        ...dc.args,
+      ],
     );
   }
 
@@ -2032,6 +2102,11 @@ class DatabaseHelper {
 
       final cid = r['company_id'] as String;
       final bid = r['batch_id'] as String;
+      final batchUuid = r['batch_uuid'] as String?;
+      if (batchUuid == null || batchUuid.isEmpty) {
+        throw AppError(
+            'Uchakataji hauna kiungo cha UUID; rekodi imehifadhiwa kwa ukaguzi.');
+      }
       final ore = dbl(r['ore_processed_kg']);
 
       final lots = await txn.query('gold_inventory',
@@ -2069,19 +2144,19 @@ class DatabaseHelper {
 
       final others = Sqflite.firstIntValue(await txn.rawQuery(
               'SELECT COUNT(*) FROM processing_records '
-              'WHERE company_id = ? AND batch_id = ? AND voided = 0',
-              [cid, bid])) ??
+              'WHERE company_id = ? AND batch_uuid = ? AND voided = 0',
+              [cid, batchUuid])) ??
           0;
       final moved = Sqflite.firstIntValue(await txn.rawQuery(
               'SELECT COUNT(*) FROM batch_movements '
-              'WHERE company_id = ? AND batch_id = ?',
-              [cid, bid])) ??
+              'WHERE company_id = ? AND batch_uuid = ?',
+              [cid, batchUuid])) ??
           0;
 
       final batch = await txn.query(
         'ore_batches',
-        where: 'company_id = ? AND batch_id = ?',
-        whereArgs: [cid, bid],
+        where: 'company_id = ? AND uuid = ?',
+        whereArgs: [cid, batchUuid],
         limit: 1,
       );
       if (batch.isNotEmpty) {
@@ -2094,8 +2169,8 @@ class DatabaseHelper {
                 : (moved > 0 ? 'Imehamishwa' : 'Imechimbwa'),
             'sync_status': 'Pending',
           },
-          where: 'company_id = ? AND batch_id = ?',
-          whereArgs: [cid, bid],
+          where: 'company_id = ? AND uuid = ?',
+          whereArgs: [cid, batchUuid],
         );
       }
 
@@ -2129,9 +2204,10 @@ class DatabaseHelper {
       results.addAll(await db.rawQuery(sql, args));
     }
 
-    await add('''SELECT 'Uzalishaji' AS module, batch_id AS title,
-      shaft_area || ' • ' || recorded_by AS details, shift_date AS record_date
-      FROM production_records WHERE company_id = ? AND mine_id = ? AND voided = 0
+    await add('''SELECT 'Uzalishaji' AS module, p.batch_id AS title,
+      p.shaft_area || ' • ' || p.recorded_by AS details, p.shift_date AS record_date,
+      'batch' AS ref_type, p.batch_uuid AS ref_uuid
+      FROM production_records p WHERE p.company_id = ? AND p.mine_id = ? AND p.voided = 0
       AND (batch_id LIKE ? OR shaft_area LIKE ? OR recorded_by LIKE ?)''',
         [c, m, like, like, like]);
     await add('''SELECT 'Batch' AS module, batch_id AS title,
@@ -2143,7 +2219,7 @@ class DatabaseHelper {
     await add('''SELECT 'Gold lot' AS module, g.batch_id AS title,
       CAST(g.grams_available AS TEXT) || ' g zimebaki • lot ' || substr(g.uuid,1,8) AS details, g.created_at AS record_date,
       'batch' AS ref_type, b.uuid AS ref_uuid
-      FROM gold_inventory g JOIN ore_batches b ON b.company_id = g.company_id AND b.batch_id = g.batch_id
+      FROM gold_inventory g JOIN ore_batches b ON b.company_id = g.company_id AND b.uuid = g.batch_uuid
       WHERE g.company_id = ? AND g.mine_id = ? AND (g.batch_id LIKE ? OR g.uuid LIKE ?)''',
         [c, m, like, like]);
     await add('''SELECT 'Deni' AS module, party AS title,
@@ -2153,15 +2229,17 @@ class DatabaseHelper {
     await add('''SELECT 'Uhamisho wa Batch' AS module, bm.batch_id AS title,
       bm.from_location || ' → ' || bm.to_location || ' • ' || bm.moved_by AS details, bm.movement_date AS record_date
       FROM batch_movements bm JOIN ore_batches b
-        ON b.company_id = bm.company_id
-        AND b.batch_id = bm.batch_id
+        ON b.company_id = bm.company_id AND b.uuid = bm.batch_uuid
       WHERE bm.company_id = ? AND b.mine_id = ?
       AND (bm.batch_id LIKE ? OR bm.child_batch_id LIKE ? OR bm.from_location LIKE ? OR bm.to_location LIKE ? OR bm.moved_by LIKE ?)''',
         [c, m, like, like, like, like, like]);
-    await add('''SELECT 'Usindikaji' AS module, batch_id AS title,
-      processed_by || ' • ' || CAST(gold_recovered_g AS TEXT) || ' g' AS details, processing_date AS record_date
-      FROM processing_records WHERE company_id = ? AND mine_id = ? AND voided = 0
-      AND (batch_id LIKE ? OR processed_by LIKE ? OR notes LIKE ?)''',
+    await add('''SELECT 'Usindikaji' AS module, p.batch_id AS title,
+      p.processed_by || ' • ' || CAST(p.gold_recovered_g AS TEXT) || ' g' AS details,
+      p.processing_date AS record_date, 'batch' AS ref_type, p.batch_uuid AS ref_uuid
+      FROM processing_records p JOIN ore_batches b
+        ON b.company_id = p.company_id AND b.uuid = p.batch_uuid
+      WHERE p.company_id = ? AND p.mine_id = ? AND p.voided = 0
+      AND (p.batch_id LIKE ? OR p.processed_by LIKE ? OR p.notes LIKE ?)''',
         [c, m, like, like, like]);
     await add('''SELECT 'Mfanyakazi' AS module, full_name AS title,
       role || ' • ' || IFNULL(phone,'') AS details, created_at AS record_date

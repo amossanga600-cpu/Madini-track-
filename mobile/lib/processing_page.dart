@@ -291,7 +291,8 @@ class _ProcessingPageState extends State<ProcessingPage> {
                 },
                 itemBuilder: (_) => const [
                   PopupMenuItem(
-                      value: 'photo', child: Text('Piga picha (scale/dhahabu)')),
+                      value: 'photo',
+                      child: Text('Piga picha (scale/dhahabu)')),
                   PopupMenuItem(value: 'void', child: Text('Futa kwa sababu')),
                 ],
               ),

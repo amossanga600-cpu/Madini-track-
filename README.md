@@ -8,11 +8,13 @@ kinatumia Kiswahili kama lugha ya msingi.
 
 - `mobile/` — programu ya Android, SQLite/SQLCipher, backup na usawazishaji.
 - `backend/` — API ya FastAPI na hifadhi ya PostgreSQL.
-- `docs/migrations/` — migrations za database ya simu hadi schema v11.
+- `docs/migrations/` — migrations za database ya simu hadi schema v12.
 - `tools/db_tests/` — majaribio ya SQLite kwa migrations, constraints na outbox.
 
 Toleo la app na toleo la schema ni vitu tofauti. App kwa sasa ni `2.2.0+6`;
-schema ya SQLite ni v11. Usibadilishe schema version bila migration salama.
+schema ya SQLite ni v12, ikiongeza Batch UUID relationships bila kuondoa
+human-readable IDs za kihistoria. Usibadilishe schema version bila migration
+salama.
 
 ## Kuendesha na kupima
 

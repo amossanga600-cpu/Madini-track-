@@ -64,8 +64,11 @@ ili merge isirudie version iliyopo. `keep_server` huhifadhi rekodi ya sasa.
 
 - `GET /v1/audit?company_uuid=<uuid>&cursor=0&limit=200&mine_id=<jina-au-uuid>`
   — audit inahitaji role yenye `audit:read`.
-- `GET /v1/batches/{batch_id-au-uuid}/trace?company_uuid=<uuid>` — hutafuta
-  batches, movements, production, processing na gold allocation zinazohusiana.
+- `GET /v1/batches/{batch_uuid-au-batch_id}/trace?company_uuid=<uuid>` —
+  hutafuta genealogy kwa UUID za Batch, movements, production, processing,
+  lots, allocations na mauzo. Batch ID ya maandishi inakubalika tu ikiwa ni ya
+  kipekee kwenye scope ya kampuni/migodi uliyopewa; la sivyo API hurudisha
+  `409` na kuhitaji UUID. Kutumia UUID ndiyo njia inayopendekezwa.
 
 Audit ya server ni append-only kupitia trigger ya PostgreSQL na kila entry
 ina hash inayofungamana na entry iliyotangulia kwa kampuni. API hutoa

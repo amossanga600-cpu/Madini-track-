@@ -88,6 +88,11 @@ extension V8Db on DatabaseHelper {
     out['foreign_keys_on'] = intv(fk.first.values.first);
     final violations = await db.rawQuery('PRAGMA foreign_key_check');
     out['foreign_key_violations'] = violations.length;
+    out['batch_traceability_issues'] = Sqflite.firstIntValue(await db.rawQuery(
+          'SELECT COUNT(*) FROM batch_traceability_issues '
+          'WHERE resolved_at IS NULL',
+        )) ??
+        0;
     return out;
   }
 
@@ -537,52 +542,207 @@ extension V8Db on DatabaseHelper {
   Future<Map<String, List<Map<String, Object?>>>> batchTrace(
       String batchUuid) async {
     final db = await database;
-    Future<List<Map<String, Object?>>> q(String name, String arg) =>
-        db.rawQuery(kTraceQueries[name]!, [arg]);
-    final out = <String, List<Map<String, Object?>>>{};
-    out['batch'] = await q('batch', batchUuid);
+    final roots = await db.query(
+      'ore_batches',
+      where: 'uuid = ? AND company_id = ? AND mine_id = ?',
+      whereArgs: [batchUuid, AppCtx.company, AppCtx.mine],
+      limit: 1,
+    );
+    if (roots.isEmpty) {
+      return {
+        for (final name in [
+          'batch',
+          'ancestors',
+          'production',
+          'children',
+          'merged_sources',
+          'movements',
+          'processing',
+          'lots',
+          'sales',
+          'evidence',
+        ])
+          name: <Map<String, Object?>>[],
+      };
+    }
+
+    final company = roots.first['company_id'] as String;
+    final batchUuids = <String>{batchUuid};
+    final pending = <String>[batchUuid];
+    while (pending.isNotEmpty) {
+      final current = pending.removeLast();
+      final candidates = <String>{};
+      final records = await db.query(
+        'ore_batches',
+        columns: ['parent_batch_uuid'],
+        where: 'uuid = ? AND company_id = ? AND mine_id = ?',
+        whereArgs: [current, company, roots.first['mine_id']],
+        limit: 1,
+      );
+      final parentUuid = records.isEmpty
+          ? null
+          : records.first['parent_batch_uuid'] as String?;
+      if (parentUuid != null) candidates.add(parentUuid);
+      final movements = await db.query(
+        'batch_movements',
+        columns: ['batch_uuid', 'parent_batch_uuid', 'child_batch_uuid'],
+        where:
+            'company_id = ? AND mine_id = ? AND (batch_uuid = ? OR parent_batch_uuid = ? '
+            'OR child_batch_uuid = ?)',
+        whereArgs: [company, roots.first['mine_id'], current, current, current],
+      );
+      for (final movement in movements) {
+        for (final key in [
+          'batch_uuid',
+          'parent_batch_uuid',
+          'child_batch_uuid',
+        ]) {
+          final value = movement[key] as String?;
+          if (value != null) candidates.add(value);
+        }
+      }
+      final children = await db.query(
+        'ore_batches',
+        columns: ['uuid'],
+        where: 'company_id = ? AND mine_id = ? AND parent_batch_uuid = ?',
+        whereArgs: [company, roots.first['mine_id'], current],
+      );
+      candidates.addAll(children.map((row) => row['uuid'] as String));
+      candidates.removeAll(batchUuids);
+      if (candidates.isEmpty) continue;
+      final placeholders = List.filled(candidates.length, '?').join(',');
+      final known = await db.rawQuery(
+        'SELECT uuid FROM ore_batches WHERE company_id = ? AND mine_id = ? '
+        'AND uuid IN ($placeholders)',
+        [company, roots.first['mine_id'], ...candidates],
+      );
+      for (final row in known) {
+        final value = row['uuid'] as String;
+        if (batchUuids.length >= 300) {
+          throw AppError(
+              'Historia ya Batch lina zaidi ya rekodi 300; tumia UUID ya hatua maalumu.');
+        }
+        batchUuids.add(value);
+        pending.add(value);
+      }
+    }
+
+    final placeholders = List.filled(batchUuids.length, '?').join(',');
+    final args = batchUuids.toList();
+    final batchRows = await db.rawQuery(
+      'SELECT * FROM ore_batches WHERE company_id = ? AND mine_id = ? '
+      'AND uuid IN ($placeholders) '
+      'ORDER BY id',
+      [company, roots.first['mine_id'], ...args],
+    );
+    final movementRows = await db.rawQuery(
+      'SELECT * FROM batch_movements WHERE company_id = ? AND mine_id = ? AND '
+      '(batch_uuid IN ($placeholders) OR parent_batch_uuid IN ($placeholders) '
+      'OR child_batch_uuid IN ($placeholders)) ORDER BY id',
+      [company, roots.first['mine_id'], ...args, ...args, ...args],
+    );
+    final productionRows = await db.rawQuery(
+      'SELECT * FROM production_records WHERE company_id = ? AND mine_id = ? AND '
+      '(batch_uuid IN ($placeholders) OR uuid IN ('
+      'SELECT source_production_uuid FROM ore_batches WHERE company_id = ? '
+      'AND uuid IN ($placeholders))) ORDER BY id',
+      [company, roots.first['mine_id'], ...args, company, ...args],
+    );
+    final processingRows = await db.rawQuery(
+      'SELECT * FROM processing_records WHERE company_id = ? AND mine_id = ? '
+      'AND batch_uuid IN ($placeholders) AND voided = 0 ORDER BY id',
+      [company, roots.first['mine_id'], ...args],
+    );
+    final lotRows = await db.rawQuery(
+      'SELECT * FROM gold_inventory WHERE company_id = ? AND mine_id = ? '
+      'AND batch_uuid IN ($placeholders) ORDER BY id',
+      [company, roots.first['mine_id'], ...args],
+    );
+    final salesRows = await db.rawQuery(
+      'SELECT s.uuid AS sale_uuid,s.sale_date,s.buyer,s.reference,a.grams,'
+      'a.lot_uuid,a.batch_uuid FROM gold_sale_allocations a '
+      'JOIN sales s ON s.uuid = a.sale_uuid WHERE s.company_id = ? '
+      'AND s.mine_id = ? AND a.batch_uuid IN ($placeholders) AND s.voided = 0 '
+      'ORDER BY s.sale_date,s.id,a.id',
+      [company, roots.first['mine_id'], ...args],
+    );
+    final directChildren = await db.query(
+      'ore_batches',
+      where: 'company_id = ? AND mine_id = ? AND parent_batch_uuid = ?',
+      whereArgs: [company, roots.first['mine_id'], batchUuid],
+      orderBy: 'id',
+    );
+    final mergedSources = await db.rawQuery(
+      'SELECT b.*, m.weight_kg AS merged_weight_kg FROM batch_movements m '
+      'JOIN ore_batches target ON target.company_id = m.company_id '
+      'AND target.mine_id = m.mine_id AND target.uuid = m.child_batch_uuid '
+      'JOIN ore_batches b ON b.company_id = m.company_id '
+      'AND b.mine_id = m.mine_id AND b.uuid = m.batch_uuid '
+      'WHERE target.company_id = ? AND target.mine_id = ? AND target.uuid = ? '
+      "AND b.status = 'Imeunganishwa' ORDER BY m.id",
+      [company, roots.first['mine_id'], batchUuid],
+    );
+
     final ancestors = <Map<String, Object?>>[];
-    Map<String, Object?>? cur =
-        out['batch']!.isEmpty ? null : out['batch']!.first;
-    var guard = 0;
-    while (cur != null && cur['parent_batch_uuid'] != null && guard++ < 20) {
-      final p = await q('batch', cur['parent_batch_uuid'] as String);
-      if (p.isEmpty) break;
-      ancestors.add(p.first);
-      cur = p.first;
+    var ancestorUuid = roots.first['parent_batch_uuid'] as String?;
+    while (ancestorUuid != null && ancestors.length < 1000) {
+      final rows = await db.query(
+        'ore_batches',
+        where: 'company_id = ? AND mine_id = ? AND uuid = ?',
+        whereArgs: [company, roots.first['mine_id'], ancestorUuid],
+        limit: 1,
+      );
+      if (rows.isEmpty) break;
+      final ancestor = rows.first;
+      ancestors.add(ancestor);
+      ancestorUuid = ancestor['parent_batch_uuid'] as String?;
     }
-    out['ancestors'] = ancestors;
-    final rootUuid =
-        ancestors.isEmpty ? batchUuid : ancestors.last['uuid'] as String;
-    out['production'] = await q('production', rootUuid);
-    for (final n in [
-      'children',
-      'merged_sources',
-      'movements',
-      'processing',
-      'lots',
-      'sales',
-    ]) {
-      out[n] = await q(n, batchUuid);
-    }
-    final ids = <String>{
-      batchUuid,
-      for (final r in out['production']!) r['uuid'] as String,
-      for (final r in out['lots']!) r['uuid'] as String,
-      for (final r in out['sales']!) r['sale_uuid'] as String,
+
+    final evidenceIds = <String>{
+      ...batchUuids,
+      ...productionRows.map((row) => row['uuid'] as String),
+      ...movementRows.map((row) => row['uuid'] as String),
+      ...processingRows.map((row) => row['uuid'] as String),
+      ...lotRows.map((row) => row['uuid'] as String),
+      ...salesRows.map((row) => row['sale_uuid'] as String),
     };
-    final ev = <Map<String, Object?>>[];
-    for (final id in ids) {
-      ev.addAll(await q('evidence', id));
+    final evidenceRows = <Map<String, Object?>>[];
+    final evidenceList = evidenceIds.toList();
+    for (var start = 0; start < evidenceList.length; start += 300) {
+      final chunk = evidenceList.skip(start).take(300).toList();
+      final evidencePlaceholders = List.filled(chunk.length, '?').join(',');
+      evidenceRows.addAll(await db.rawQuery(
+        'SELECT * FROM attachments WHERE company_id = ? AND record_uuid IN '
+        '($evidencePlaceholders) AND deleted_at IS NULL ORDER BY id',
+        [company, ...chunk],
+      ));
     }
-    out['evidence'] = ev;
+
+    final out = <String, List<Map<String, Object?>>>{};
+    out['batch'] = [
+      roots.first,
+      ...batchRows.where((row) => row['uuid'] != batchUuid),
+    ];
+    out['ancestors'] = ancestors;
+    out['production'] = productionRows;
+    out['children'] = directChildren;
+    out['merged_sources'] = mergedSources;
+    out['movements'] = movementRows;
+    out['processing'] = processingRows;
+    out['lots'] = lotRows;
+    out['sales'] = salesRows;
+    out['evidence'] = evidenceRows;
     return out;
   }
 
   /// Chanzo cha dhahabu iliyouzwa: Batch/lot zilizotoa gramu kupitia FIFO.
   Future<List<Map<String, Object?>>> saleSources(String saleUuid) async {
     final db = await database;
-    return db.rawQuery(kTraceQueries['sale_sources']!, [saleUuid]);
+    return db.rawQuery(kTraceQueries['sale_sources']!, [
+      saleUuid,
+      AppCtx.company,
+      AppCtx.mine,
+    ]);
   }
 
   // ------------------------------------------------------------------ Madeni yanayokaribia

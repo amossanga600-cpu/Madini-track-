@@ -8,6 +8,14 @@ import psycopg
 from psycopg_pool import ConnectionPool
 
 
+class AmbiguousBatchIdentifier(ValueError):
+    pass
+
+
+class BatchGenealogyTooLarge(ValueError):
+    pass
+
+
 def _append_audit(
     connection, company_uuid, user_id, action, entity, record_uuid, detail
 ):
@@ -255,6 +263,42 @@ class PostgresRepo:
                         'status': 'rejected',
                         'message': 'Jina la mgodi limetumika tayari ndani ya kampuni.',
                     }
+
+            if ev['entity'] == 'ore_batches':
+                batch_id = ev['data'].get('batch_id')
+                mine_id = ev['data'].get('mine_id')
+                if isinstance(batch_id, str) and batch_id and isinstance(mine_id, str) and mine_id:
+                    duplicate_batch = c.execute(
+                        """
+                        SELECT 1 FROM sync_records
+                        WHERE company_id=%s AND entity='ore_batches'
+                          AND record_uuid<>%s
+                          AND data->>'batch_id'=%s
+                        LIMIT 1
+                        """,
+                        (company_uuid, ev['record_uuid'], batch_id),
+                    ).fetchone()
+                    if duplicate_batch:
+                        c.execute(
+                            'INSERT INTO sync_events(device_id,idempotency_key,company_id,outcome,user_id) '
+                            'VALUES (%s,%s,%s,%s,%s)',
+                            (device_id, key, company_uuid, 'rejected', user_id),
+                        )
+                        _append_audit(
+                            c, company_uuid, user_id, 'sync_rejected', 'ore_batches',
+                            ev['record_uuid'], {
+                                'device_id': device_id,
+                                'idempotency_key': key,
+                                'reason': 'batch_id_already_exists_in_company',
+                                'mine_id': mine_id,
+                                'batch_id': batch_id,
+                            },
+                        )
+                        return {
+                            'idempotency_key': key,
+                            'status': 'rejected',
+                            'message': 'Batch ID imetumika tayari ndani ya kampuni hii.',
+                        }
 
             existing = c.execute(
                 'SELECT version,device_id,data FROM sync_records '
@@ -550,49 +594,93 @@ class PostgresRepo:
                         mine_uuids=None):
         batches = {}
         movements = {}
-        identifiers = {identifier}
-        for _ in range(50):
+        allowed_mines = None
+        if mine_uuids is not None:
+            allowed_mines = set(mine_uuids) | self.mine_names(company_uuid, mine_uuids)
+
+        try:
+            start_uuid = str(uuid.UUID(identifier))
+        except (ValueError, AttributeError):
             with self._conn() as c:
-                batch_rows = c.execute(
-                    """
+                query = """
+                    SELECT record_uuid FROM sync_records
+                    WHERE company_id=%s AND entity='ore_batches'
+                      AND data->>'batch_id'=%s
+                """
+                params = [company_uuid, identifier]
+                if allowed_mines is not None:
+                    if not allowed_mines:
+                        return {'batches': [], 'movements': [], 'related': {}}
+                    query += " AND data->>'mine_id'=ANY(%s)"
+                    params.append(list(allowed_mines))
+                query += ' LIMIT 2'
+                rows = c.execute(query, params).fetchall()
+            if len(rows) > 1:
+                raise AmbiguousBatchIdentifier(identifier)
+            if not rows:
+                return {'batches': [], 'movements': [], 'related': {}}
+            start_uuid = rows[0][0]
+
+        batch_uuids = {start_uuid}
+        pending = [start_uuid]
+        mine_values = list(allowed_mines) if allowed_mines is not None else None
+        while pending and len(batch_uuids) <= limit:
+            pending.pop()
+            with self._conn() as c:
+                batch_query = """
                     SELECT record_uuid,data FROM sync_records
                     WHERE company_id=%s AND entity='ore_batches'
-                      AND (record_uuid=ANY(%s) OR data->>'batch_id'=ANY(%s)
-                           OR data->>'parent_batch_id'=ANY(%s))
-                    ORDER BY seq DESC LIMIT %s
-                    """,
-                    (company_uuid, list(identifiers), list(identifiers),
-                     list(identifiers), limit),
-                ).fetchall()
-                movement_rows = c.execute(
-                    """
+                      AND (record_uuid=ANY(%s) OR data->>'parent_batch_uuid'=ANY(%s))
+                """
+                batch_params = [company_uuid, list(batch_uuids), list(batch_uuids)]
+                if mine_values is not None:
+                    if not mine_values:
+                        break
+                    batch_query += " AND data->>'mine_id'=ANY(%s)"
+                    batch_params.append(mine_values)
+                batch_query += ' ORDER BY seq DESC LIMIT %s'
+                batch_params.append(limit + 1)
+                batch_rows = c.execute(batch_query, batch_params).fetchall()
+                if len(batch_rows) > limit:
+                    raise BatchGenealogyTooLarge()
+
+                movement_query = """
                     SELECT record_uuid,data FROM sync_records
                     WHERE company_id=%s AND entity='batch_movements'
-                      AND (record_uuid=ANY(%s) OR data->>'batch_id'=ANY(%s)
-                           OR data->>'parent_batch_id'=ANY(%s)
-                           OR data->>'child_batch_id'=ANY(%s))
-                    ORDER BY seq DESC LIMIT %s
-                    """,
-                    (company_uuid, list(identifiers), list(identifiers),
-                     list(identifiers), list(identifiers), limit),
-                ).fetchall()
-            discovered = set()
+                      AND (data->>'batch_uuid'=ANY(%s)
+                           OR data->>'parent_batch_uuid'=ANY(%s)
+                           OR data->>'child_batch_uuid'=ANY(%s))
+                """
+                movement_params = [
+                    company_uuid, list(batch_uuids), list(batch_uuids), list(batch_uuids)
+                ]
+                if mine_values is not None:
+                    movement_query += " AND data->>'mine_id'=ANY(%s)"
+                    movement_params.append(mine_values)
+                movement_query += ' ORDER BY seq DESC LIMIT %s'
+                movement_params.append(limit + 1)
+                movement_rows = c.execute(movement_query, movement_params).fetchall()
+                if len(movement_rows) > limit:
+                    raise BatchGenealogyTooLarge()
+
             for record_uuid, data in batch_rows:
                 batches[record_uuid] = data
-                for key in ('batch_id', 'parent_batch_id'):
+                for key in ('uuid', 'parent_batch_uuid'):
                     value = data.get(key)
-                    if isinstance(value, str) and value:
-                        discovered.add(value)
+                    if isinstance(value, str) and value and value not in batch_uuids:
+                        if len(batch_uuids) >= limit:
+                            raise BatchGenealogyTooLarge()
+                        batch_uuids.add(value)
+                        pending.append(value)
             for record_uuid, data in movement_rows:
                 movements[record_uuid] = data
-                for key in ('batch_id', 'parent_batch_id', 'child_batch_id'):
+                for key in ('batch_uuid', 'parent_batch_uuid', 'child_batch_uuid'):
                     value = data.get(key)
-                    if isinstance(value, str) and value:
-                        discovered.add(value)
-            new_identifiers = discovered - identifiers
-            if not new_identifiers or len(identifiers) >= limit:
-                break
-            identifiers.update(new_identifiers)
+                    if isinstance(value, str) and value and value not in batch_uuids:
+                        if len(batch_uuids) >= limit:
+                            raise BatchGenealogyTooLarge()
+                        batch_uuids.add(value)
+                        pending.append(value)
 
         with self._conn() as c:
             related = {}
@@ -601,40 +689,51 @@ class PostgresRepo:
                 'processing_records',
                 'gold_inventory',
                 'gold_sale_allocations',
-                'sales',
             ):
-                rows = c.execute(
-                    """
+                query = """
                     SELECT record_uuid,data FROM sync_records
                     WHERE company_id=%s AND entity=%s
-                      AND (data->>'batch_id'=ANY(%s)
-                           OR data->>'source_batch_id'=ANY(%s))
-                    ORDER BY seq LIMIT %s
-                    """,
-                    (company_uuid, entity, list(identifiers), list(identifiers), limit),
-                ).fetchall()
+                      AND (data->>'batch_uuid'=ANY(%s)
+                           OR data->>'source_batch_uuid'=ANY(%s))
+                """
+                params = [company_uuid, entity, list(batch_uuids), list(batch_uuids)]
+                if mine_values is not None:
+                    query += " AND data->>'mine_id'=ANY(%s)"
+                    params.append(mine_values)
+                query += ' ORDER BY seq LIMIT %s'
+                params.append(limit + 1)
+                rows = c.execute(query, params).fetchall()
+                if len(rows) > limit:
+                    raise BatchGenealogyTooLarge()
                 related[entity] = [
                     {'record_uuid': row[0], 'data': row[1]} for row in rows
                 ]
 
-        if mine_uuids is not None:
-            mine_names = self.mine_names(company_uuid, mine_uuids)
-            mine_names.update(mine_uuids)
-            batches = {
-                record_uuid: data for record_uuid, data in batches.items()
-                if data.get('mine_id') in mine_names
+            sale_uuids = {
+                record['data'].get('sale_uuid')
+                for record in related['gold_sale_allocations']
+                if isinstance(record['data'].get('sale_uuid'), str)
             }
-            movements = {
-                record_uuid: data for record_uuid, data in movements.items()
-                if data.get('mine_id') in mine_names
-            }
-            related = {
-                entity: [
-                    record for record in records
-                    if record['data'].get('mine_id') in mine_names
+            if sale_uuids:
+                query = """
+                    SELECT record_uuid,data FROM sync_records
+                    WHERE company_id=%s AND entity='sales' AND record_uuid=ANY(%s)
+                """
+                params = [company_uuid, list(sale_uuids)]
+                if mine_values is not None:
+                    query += " AND data->>'mine_id'=ANY(%s)"
+                    params.append(mine_values)
+                query += ' ORDER BY seq LIMIT %s'
+                params.append(limit + 1)
+                rows = c.execute(query, params).fetchall()
+                if len(rows) > limit:
+                    raise BatchGenealogyTooLarge()
+                related['sales'] = [
+                    {'record_uuid': row[0], 'data': row[1]} for row in rows
                 ]
-                for entity, records in related.items()
-            }
+            else:
+                related['sales'] = []
+
         return {
             'batches': [
                 {'record_uuid': record_uuid, 'data': data}

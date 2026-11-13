@@ -6,18 +6,20 @@ mmiliki/mtoa huduma.
 
 - 🟡 Offline-first SQLite na sync outbox; FFI tests zipo, lakini end-to-end ya
   vifaa vingi na seva halisi bado inasubiri.
-- 🟡 Batch UUID, device-aware human IDs, split/merge genealogy na audit:
-  SQLite/mobile tests zinapaswa kupita; staging ya multi-device bado inasubiri.
+- 🟡 Batch UUID relationships, device-aware human IDs, split/merge genealogy
+  na UUID API trace: SQLite/mobile tests zimepita; staging ya multi-device
+  bado inasubiri.
 - 🟡 SQLCipher production path, secure key storage na plaintext migration zipo
   kwenye code; Android device verification haijafanyika.
-- ✅ Migrations hadi schema v11 ni additive; SQLite tests hutumia synthetic
+- ✅ Migration v11→v12 ya UUID ni additive; SQLite tests hutumia synthetic
   historical fixture, si database ya mteja.
 - 🟡 Flutter analyzer/tests zinaendeshwa kwenye environment yenye SDK; angalia
   `docs/TEST_STATUS.md` kwa matokeo ya session ya mwisho.
-- 🟡 Debug APK inaweza kujengwa; haimaanishi install/launch kwenye kifaa.
+- ❌ Debug APK build ya sasa imeshindwa kwa Gradle daemon kuondoka; hakuna APK
+  mpya iliyothibitishwa.
 - 🔑 Release APK/AAB inahitaji production keystore na owner-approved signing.
-- 🟡 Backup ina preview/checksum na restore path; restore halisi na backup
-  encrypted lazima zijaribiwe kwenye kifaa.
+- 🟡 `.mtbackup` mpya na snapshot ya restore zinahitaji password na husimbwa;
+  SQLCipher/device restore halisi bado lazima zijaribiwe kwenye kifaa.
 - 🟡 FastAPI/PostgreSQL local integration tests zimepita (4/4); PostgreSQL
   staging/Supabase, DB grants/RLS behavior ya provider, HTTPS domain na live
   Flutter integration bado vinasubiri.

@@ -93,6 +93,13 @@ class DbEncryption {
     }
   }
 
+  static Future<void> _removeDatabaseSidecars(String path) async {
+    for (final suffix in ['-journal', '-wal', '-shm']) {
+      final file = File('$path$suffix');
+      if (await file.exists()) await file.delete();
+    }
+  }
+
   static Future<String> prepare(String path) async {
     final old = '$path.plain-old';
     final temporary = '$path.enc.tmp';
@@ -135,7 +142,6 @@ class DbEncryption {
       } finally {
         await encrypted?.close();
       }
-      await _removeDatabaseFiles(old);
     }
 
     final hasData = await original.exists() && await original.length() > 0;
@@ -144,7 +150,6 @@ class DbEncryption {
     if (await isPlainSqlite(path)) {
       final key = await _getOrCreateKey();
       await _migratePlain(path, key, temporary, old);
-      await _deleteLegacyPlainBackups(path);
       return key;
     }
 
@@ -159,6 +164,26 @@ class DbEncryption {
     return key!;
   }
 
+  static Future<void> verifyAndFinalizeMigration(
+    String path,
+    Database database,
+  ) async {
+    final integrity = await database.rawQuery('PRAGMA quick_check');
+    final foreignKeyViolations =
+        await database.rawQuery('PRAGMA foreign_key_check');
+    if (integrity.isEmpty ||
+        integrity.first.values.first != 'ok' ||
+        foreignKeyViolations.isNotEmpty) {
+      throw DbKeyMissingError(
+        'Uhakiki wa database baada ya kuifungua umeshindwa. '
+        'Nakala za urejeshaji zimehifadhiwa.',
+      );
+    }
+    await _removeDatabaseFiles('$path.plain-old');
+    await _removeDatabaseFiles('$path.enc.tmp');
+    await _deleteLegacyPlainBackups(path);
+  }
+
   static Future<void> _migratePlain(
     String path,
     String key,
@@ -168,6 +193,15 @@ class DbEncryption {
     await _removeDatabaseFiles(temporary);
     final plain = await openDatabase(path);
     try {
+      final checkpoint =
+          await plain.rawQuery('PRAGMA wal_checkpoint(TRUNCATE)');
+      if (checkpoint.isNotEmpty &&
+          (checkpoint.first['busy'] as num?)?.toInt() != 0) {
+        throw DbKeyMissingError(
+          'Database ina WAL ambayo haikuweza kuhifadhiwa salama; '
+          'faili la awali limeachwa bila kubadilishwa.',
+        );
+      }
       final version = await plain.getVersion();
       final objectCount = Sqflite.firstIntValue(
             await plain.rawQuery('SELECT COUNT(*) FROM sqlite_master'),
@@ -214,6 +248,7 @@ class DbEncryption {
     }
 
     await File(path).rename(old);
+    await _removeDatabaseSidecars(path);
     try {
       await File(temporary).rename(path);
     } catch (_) {
@@ -222,7 +257,6 @@ class DbEncryption {
       }
       rethrow;
     }
-    await _removeDatabaseFiles(old);
   }
 
   static Future<void> _deleteLegacyPlainBackups(String path) async {

@@ -6,7 +6,10 @@
  "allocation_sale": "SELECT COUNT(*) FROM gold_sale_allocations a WHERE NOT EXISTS (SELECT 1 FROM sales s WHERE s.uuid = a.sale_uuid)",
  "allocation_lot": "SELECT COUNT(*) FROM gold_sale_allocations a WHERE NOT EXISTS (SELECT 1 FROM gold_inventory g WHERE g.uuid = a.lot_uuid)",
  "lot_processing": "SELECT COUNT(*) FROM gold_inventory a WHERE NOT EXISTS (SELECT 1 FROM processing_records p WHERE p.uuid = a.processing_uuid)",
- "batch_without_production": "SELECT COUNT(*) FROM ore_batches b WHERE b.parent_batch_id IS NULL AND NOT EXISTS (SELECT 1 FROM production_records p WHERE p.company_id = b.company_id AND (p.batch_id = b.batch_id OR p.uuid = b.source_production_uuid))",
- "movement_without_batch": "SELECT COUNT(*) FROM batch_movements m WHERE NOT EXISTS (SELECT 1 FROM ore_batches b WHERE b.company_id = m.company_id AND b.batch_id = m.batch_id)",
- "processing_without_batch": "SELECT COUNT(*) FROM processing_records p WHERE NOT EXISTS (SELECT 1 FROM ore_batches b WHERE b.company_id = p.company_id AND b.batch_id = p.batch_id)"
+ "batch_without_production": "SELECT COUNT(*) FROM ore_batches b WHERE b.parent_batch_uuid IS NULL AND b.source_production_uuid IS NULL AND NOT EXISTS (SELECT 1 FROM batch_movements m WHERE m.child_batch_uuid = b.uuid)",
+ "movement_without_batch": "SELECT COUNT(*) FROM batch_movements m WHERE m.batch_uuid IS NULL OR NOT EXISTS (SELECT 1 FROM ore_batches b WHERE b.company_id = m.company_id AND b.uuid = m.batch_uuid)",
+ "processing_without_batch": "SELECT COUNT(*) FROM processing_records p WHERE p.batch_uuid IS NULL OR NOT EXISTS (SELECT 1 FROM ore_batches b WHERE b.company_id = p.company_id AND b.uuid = p.batch_uuid)",
+ "production_without_batch": "SELECT COUNT(*) FROM production_records p WHERE p.batch_uuid IS NULL OR NOT EXISTS (SELECT 1 FROM ore_batches b WHERE b.company_id = p.company_id AND b.uuid = p.batch_uuid)",
+ "gold_without_batch": "SELECT COUNT(*) FROM gold_inventory g WHERE g.batch_uuid IS NULL OR NOT EXISTS (SELECT 1 FROM ore_batches b WHERE b.company_id = g.company_id AND b.uuid = g.batch_uuid)",
+ "allocation_without_batch": "SELECT COUNT(*) FROM gold_sale_allocations a WHERE a.batch_uuid IS NULL OR NOT EXISTS (SELECT 1 FROM ore_batches b WHERE b.uuid = a.batch_uuid)"
 }

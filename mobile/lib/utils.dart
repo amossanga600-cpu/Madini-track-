@@ -55,10 +55,7 @@ String shortDate(dynamic v) {
 double dbl(dynamic v) {
   if (v == null) return 0;
   if (v is num) return v.toDouble();
-  return double.tryParse(v.toString()) ?? 0;
-}
-
-int intv(dynamic v) {
+  return double.tryParse(v.toString()) ?? 0;}
   if (v == null) return 0;
   if (v is num) return v.toInt();
   return int.tryParse(v.toString()) ?? 0;
@@ -435,7 +432,7 @@ class VoidedStyle {
 // ---------------------------------------------------------------------------
 // Fomu ya jumla inayojengwa kutoka kwenye orodha ya fields
 // ---------------------------------------------------------------------------
-enum FType { text, integer, decimal, dropdown, date, multiline }
+enum FType { text, password, integer, decimal, dropdown, date, multiline }
 
 class Opt {
   final String value;
@@ -666,6 +663,20 @@ class _SpecFormState extends State<SpecForm> {
       case FType.text:
         return TextFormField(
           controller: _c[f.key],
+          decoration: InputDecoration(
+            labelText: label,
+            hintText: f.hint,
+            border: const OutlineInputBorder(),
+          ),
+          validator: (v) => _validate(f, v),
+        );
+
+      case FType.password:
+        return TextFormField(
+          controller: _c[f.key],
+          obscureText: true,
+          enableSuggestions: false,
+          autocorrect: false,
           decoration: InputDecoration(
             labelText: label,
             hintText: f.hint,

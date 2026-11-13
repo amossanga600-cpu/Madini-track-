@@ -6,9 +6,10 @@ ya unit pekee si uthibitisho wa utayari wa uzalishaji.
 ## Inahitaji kifaa au miundombinu halisi
 
 - Thibitisha SQLCipher kwenye simu halisi: usakinishaji mpya, uhamishaji wa
-  database ya zamani, kufunga/kufungua app, na kukosekana kwa ufunguo.
-- Jaribu restore kutoka `.mtbackup` halisi; backup inaweza kuwa wazi ikiwa
-  mtumiaji hakuweka nenosiri.
+  database ya zamani, kufunga/kufungua app, interruption/restart, WAL, na
+  kukosekana kwa ufunguo.
+- Jaribu create/restore ya `.mtbackup` halisi, pamoja na snapshot kabla ya
+  restore; import ya backup ya zamani isiyosimbwa ibaki kwenye staging pekee.
 - Pima muda wa PIN ya PBKDF2 iterations 600,000 na matumizi ya kumbukumbu
   kwenye simu ya kiwango cha chini.
 - Deploy API kwenye PostgreSQL/Supabase ya staging. Local PostgreSQL
@@ -31,8 +32,8 @@ ya unit pekee si uthibitisho wa utayari wa uzalishaji.
 - Upload/download ya attachments kwenye object storage haijakamilika.
 - SQLCipher key rotation, usimbaji wa picha/attachments, certificate pinning
   na audit hash-chain ya simu bado hazipo.
-- Backup ya faili bado inaruhusu payload isiyosimbwa ikiwa nenosiri
-  halijawekwa. Weka nenosiri lenye nguvu kabla ya kuhamisha backup.
+- Import ya legacy backup isiyosimbwa bado inaruhusiwa kwa backward
+  compatibility; usitumie payload hiyo nje ya kifaa kabla ya kuisimbwa.
 - Rate limiter ya login huhifadhi counters PostgreSQL na inaweza kushirikiwa
   na replicas, lakini deployment, proxy client-IP configuration, monitoring na
   rate-limit tests za hosting bado hazijathibitishwa.

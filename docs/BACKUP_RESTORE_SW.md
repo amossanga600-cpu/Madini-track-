@@ -3,15 +3,16 @@
 ## Kutengeneza backup
 
 1. Fungua **Mipangilio** kisha chagua **Backup ya Faili (inapendekezwa)**.
-2. Weka nenosiri la backup. Nenosiri ni la hiari kwenye app, lakini backup bila
-   nenosiri haijasimbwa na haipaswi kutumwa kwa mtu mwingine.
+2. Weka nenosiri la angalau herufi 12. Backup mpya husimbwa; hifadhi nenosiri
+   kando na faili, kwa mfano kwenye password manager ya shirika.
 3. Hifadhi faili la `.mtbackup` kwenye eneo salama. Hifadhi nenosiri kando,
    kwa mfano kwenye password manager ya shirika.
 4. Tengeneza backup mara kwa mara na kabla ya restore, kubadilisha simu au
    kufanya matengenezo makubwa.
 
-App pia ina backup ya maandishi na kurejesha kwa kubandika JSON. Njia hiyo si
-njia inayopendekezwa kwa faili kubwa na maandishi yanaweza kuwa na data nyeti.
+Njia za backup na restore za Settings zote hutumia faili lililosimbwa. Backup
+za zamani zisizosimbwa bado zinaweza kuingizwa kwa ulinganifu, lakini app
+haitengenezi tena nakala mpya ya maandishi/JSON isiyosimbwa kupitia UI.
 
 ## Kuthibitisha na kurejesha
 
@@ -19,7 +20,8 @@ njia inayopendekezwa kwa faili kubwa na maandishi yanaweza kuwa na data nyeti.
 2. Weka nenosiri ikiwa backup ilisimbwa.
 3. Soma preview na idadi za rekodi kabla ya kuthibitisha.
 4. Restore hubadilisha data ya sasa; app hutengeneza snapshot ya hali ya sasa
-   kabla ya kufanya restore.
+   iliyosimbwa kwa nenosiri kabla ya kufanya restore. Kwa backup ya zamani
+   isiyosimbwa, weka nenosiri jipya la snapshot.
 5. Baada ya restore, hakiki kampuni/mgodi, uzalishaji, batches, mauzo, matumizi
    na ripoti muhimu. Kisha fanya sync pale seva inapopatikana.
 

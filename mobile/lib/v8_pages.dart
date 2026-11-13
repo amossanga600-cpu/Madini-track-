@@ -565,7 +565,7 @@ class _SyncPageState extends State<SyncPage> {
                           try {
                             await SyncService.logout();
                           } catch (e) {
-                            if (mounted) snack(context, errText(e));
+                            if (context.mounted) snack(context, errText(e));
                           }
                           await _load();
                         },
