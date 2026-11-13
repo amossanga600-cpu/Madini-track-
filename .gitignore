@@ -15,3 +15,6 @@ __pycache__/
 .env
 backend/.env
 backend/.env.production
+Madini-Track-v11/
+**/.gradle/
+**/build/
