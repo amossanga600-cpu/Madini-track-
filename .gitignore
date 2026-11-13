@@ -18,3 +18,8 @@ backend/.env.production
 Madini-Track-v11/
 **/.gradle/
 **/build/
+mobile/android/key.properties
+key.properties
+*.jks
+*.keystore
+.env.*

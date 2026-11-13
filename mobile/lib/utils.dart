@@ -56,10 +56,6 @@ double dbl(dynamic v) {
   if (v == null) return 0;
   if (v is num) return v.toDouble();
   return double.tryParse(v.toString()) ?? 0;}
-  if (v == null) return 0;
-  if (v is num) return v.toInt();
-  return int.tryParse(v.toString()) ?? 0;
-}
 
 double? parseNum(String? s) {
   if (s == null) return null;
