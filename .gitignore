@@ -23,3 +23,7 @@ key.properties
 *.jks
 *.keystore
 .env.*
+*.jks
+*.keystore
+.env
+.env.*
