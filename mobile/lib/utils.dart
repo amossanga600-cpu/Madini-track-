@@ -781,3 +781,9 @@ Future<bool> showSpecSheet(
   );
   return r ?? false;
 }
+
+int intv(dynamic v) {
+  if (v == null) return 0;
+  if (v is num) return v.toInt();
+  return int.tryParse(v.toString()) ?? 0;
+}
