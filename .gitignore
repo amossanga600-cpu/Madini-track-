@@ -27,3 +27,7 @@ key.properties
 *.keystore
 .env
 .env.*
+*.apk
+*.zip
+*.jks
+*.keystore
