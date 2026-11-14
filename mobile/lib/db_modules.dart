@@ -1,4 +1,4 @@
-import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_sqlcipher/sqflite.dart';
 import 'app_context.dart';
 import 'database_helper.dart';
 import 'utils.dart';
@@ -770,6 +770,7 @@ extension SalesDb on DatabaseHelper {
           'uuid': newUuid(),
           'sale_uuid': suuid,
           'lot_uuid': lot['uuid'],
+          'batch_uuid': lot['batch_uuid'],
           'grams': take,
           'created_at': nowIso(),
           'updated_at': nowIso(),

@@ -10,6 +10,7 @@ import 'package:madini_tracker/db_modules.dart';
 import 'package:madini_tracker/db_reports.dart';
 import 'package:madini_tracker/db_v8.dart';
 import 'package:madini_tracker/sync_service.dart';
+import 'package:madini_tracker/utils.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
@@ -19,6 +20,7 @@ void main() {
   setUpAll(() {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
+    DatabaseHelper.testFactory = databaseFactoryFfi;
   });
 
   setUp(() async {
@@ -46,9 +48,9 @@ void main() {
       bags: 5,
       weightKg: kg);
 
-  test('foreign keys zimewashwa na schema ni v10', () async {
+  test('foreign keys zimewashwa na schema ni v12', () async {
     final d = await db.database;
-    expect(await d.getVersion(), 10);
+    expect(await d.getVersion(), 12);
     final r = await db.integrityReport();
     expect(r['foreign_keys_on'], 1);
     expect(r['foreign_key_violations'], 0);
@@ -56,20 +58,107 @@ void main() {
 
   test('upgrade huhifadhi nakala ya database kabla ya migration', () async {
     final d = await db.database;
-    await d.setVersion(9);
+    for (final trigger in [
+      'production_batch_uuid_insert',
+      'production_batch_uuid_update',
+      'ore_batch_uuid_immutable',
+      'batch_movement_uuid_insert',
+      'batch_movement_uuid_update',
+      'processing_batch_uuid_insert',
+      'processing_batch_uuid_update',
+      'gold_inventory_batch_uuid_insert',
+      'gold_inventory_batch_uuid_update',
+      'gold_allocation_batch_uuid_insert',
+      'gold_allocation_batch_uuid_update',
+    ]) {
+      await d.execute('DROP TRIGGER $trigger');
+    }
+    for (final index in [
+      'idx_production_batch_uuid',
+      'idx_movement_batch_uuid',
+      'idx_movement_parent_uuid',
+      'idx_movement_child_uuid',
+      'idx_processing_batch_uuid',
+      'idx_gold_batch_uuid',
+      'idx_allocation_batch_uuid',
+    ]) {
+      await d.execute('DROP INDEX $index');
+    }
+    await d.execute('DROP VIEW v_mass_balance');
+    await d.execute('DROP TABLE batch_traceability_issues');
+    for (final tableAndColumn in [
+      ('production_records', 'batch_uuid'),
+      ('batch_movements', 'mine_id'),
+      ('batch_movements', 'batch_uuid'),
+      ('batch_movements', 'parent_batch_uuid'),
+      ('batch_movements', 'child_batch_uuid'),
+      ('processing_records', 'batch_uuid'),
+      ('gold_inventory', 'batch_uuid'),
+      ('gold_sale_allocations', 'batch_uuid'),
+    ]) {
+      await d.execute(
+          'ALTER TABLE ${tableAndColumn.$1} DROP COLUMN ${tableAndColumn.$2}');
+    }
+    await d.setVersion(11);
     await db.close();
 
     final upgraded = await db.database;
-    expect(await upgraded.getVersion(), 10);
-    final backup = File('${tmp.path}/madini_local.db.pre-v10.bak');
+    expect(await upgraded.getVersion(), 12);
+    final backup = File('${tmp.path}/madini_local.db.pre-v12.bak');
     expect(await backup.exists(), isTrue);
     final probe = await openReadOnlyDatabase(backup.path);
     try {
-      expect(await probe.getVersion(), 9);
+      expect(await probe.getVersion(), 11);
       expect(await probe.query('companies'), isNotEmpty);
     } finally {
       await probe.close();
     }
+  });
+
+  test('Batch ID mpya hutofautisha vifaa kwa utambulisho thabiti', () async {
+    final firstDeviceId = await db.getDeviceId();
+    final firstId = await db.nextBatchId();
+    final tag = firstDeviceId.replaceAll('-', '').substring(20).toUpperCase();
+    expect(firstId, matches(RegExp(r'^B\d{6}-[0-9A-F]{12}-\d{4}$')));
+    expect(firstId, contains(tag));
+    await prod(firstId);
+
+    const secondDeviceId = '12345678-1234-4234-8234-123456789abc';
+    final d = await db.database;
+    await d.update(
+      'app_metadata',
+      {'value': secondDeviceId},
+      where: 'key = ?',
+      whereArgs: ['device_id'],
+    );
+    AppCtx.deviceId = secondDeviceId;
+    final secondId = await db.nextBatchId();
+    expect(secondId, isNot(firstId));
+    expect(secondId, contains('123456789ABC'));
+    await prod(secondId);
+
+    final records = await d.query(
+      'production_records',
+      where: 'batch_id IN (?, ?)',
+      whereArgs: [firstId, secondId],
+    );
+    expect(records.map((row) => row['uuid']).toSet(), hasLength(2));
+    expect(records.map((row) => row['device_id']).toSet(),
+        {firstDeviceId, secondDeviceId});
+  });
+
+  test('Batch iliyogawanywa hupata ID ya mtoto yenye tag ya kifaa', () async {
+    await prod('B-SPLIT', kg: 100);
+    final deviceId = await db.getDeviceId();
+    final tag = deviceId.replaceAll('-', '').substring(20).toUpperCase();
+    final childId = await db.moveBatch(
+      batchId: 'B-SPLIT',
+      toLocation: 'Stoo',
+      weightKg: 35,
+    );
+    expect(childId, 'B-SPLIT-S$tag-1');
+    expect((await db.getBatch('B-SPLIT'))!['weight_kg'], 65.0);
+    expect((await db.getBatch(childId))!['weight_kg'], 35.0);
   });
 
   test(
@@ -133,6 +222,26 @@ void main() {
         1);
   });
 
+  test('Batch ID iliyopo kwenye uzalishaji pekee haikubaliki tena', () async {
+    await prod('B-ORPHAN');
+    final d = await db.database;
+    await d.delete(
+      'ore_batches',
+      where: 'company_id = ? AND batch_id = ?',
+      whereArgs: [AppCtx.company, 'B-ORPHAN'],
+    );
+
+    await expectLater(prod('B-ORPHAN'), throwsA(isA<AppError>()));
+    expect(
+      await d.query(
+        'production_records',
+        where: 'company_id = ? AND batch_id = ?',
+        whereArgs: [AppCtx.company, 'B-ORPHAN'],
+      ),
+      hasLength(1),
+    );
+  });
+
   test(
       'merge huunganisha uzito ndani ya transaction na huacha traceability ya vyanzo',
       () async {
@@ -143,6 +252,11 @@ void main() {
       targetLocation: 'Crusher',
       notes: 'Mchanganyiko wa jaribio',
     );
+    final deviceTag = (await db.getDeviceId())
+        .replaceAll('-', '')
+        .substring(20)
+        .toUpperCase();
+    expect(mergedId, startsWith('M-$deviceTag-'));
     final d = await db.database;
     final sources = await d.query(
       'ore_batches',

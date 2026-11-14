@@ -28,7 +28,7 @@ class BackupPreview {
 /// snapshot ya hali ya sasa kabla ya kurejesha.
 class BackupService {
   static const String format = 'madini_track_backup';
-  static const int _iterations = 60000;
+  static const int _iterations = 600000;
 
   static List<int> _randomBytes(int n) {
     final r = Random.secure();
@@ -49,8 +49,13 @@ class BackupService {
     return d;
   }
 
-  static Future<File> createBackupFile(
-      {String? password, String prefix = 'madini_backup'}) async {
+  static Future<File> createBackupFile({
+    required String password,
+    String prefix = 'madini_backup',
+  }) async {
+    if (password.trim().length < 12) {
+      throw AppError('Nywila ya backup iwe na angalau herufi 12.');
+    }
     final json = await DatabaseHelper.instance.exportBackupJson();
     final plain = utf8.encode(json);
     final envelope = <String, dynamic>{
@@ -59,22 +64,17 @@ class BackupService {
       'schema_version': kDbVersion,
       'created_at': nowIso(),
       'sha256': crypto.sha256.convert(plain).toString(),
-      'encrypted': false,
+      'encrypted': true,
     };
-    if (password != null && password.isNotEmpty) {
-      final salt = _randomBytes(16);
-      final key = await _deriveKey(password, salt, _iterations);
-      final box = await AesGcm.with256bits().encrypt(plain, secretKey: key);
-      envelope['encrypted'] = true;
-      envelope['kdf'] = {
-        'name': 'pbkdf2-hmac-sha256',
-        'iterations': _iterations,
-        'salt': base64Encode(salt),
-      };
-      envelope['payload'] = base64Encode(box.concatenation());
-    } else {
-      envelope['payload'] = json;
-    }
+    final salt = _randomBytes(16);
+    final key = await _deriveKey(password, salt, _iterations);
+    final box = await AesGcm.with256bits().encrypt(plain, secretKey: key);
+    envelope['kdf'] = {
+      'name': 'pbkdf2-hmac-sha256',
+      'iterations': _iterations,
+      'salt': base64Encode(salt),
+    };
+    envelope['payload'] = base64Encode(box.concatenation());
     final dir = await backupDir();
     final stamp = nowIso().replaceAll(RegExp(r'[^0-9]'), '').substring(0, 14);
     final file = File(p.join(dir.path, '${prefix}_$stamp.mtbackup'));
@@ -109,8 +109,16 @@ class BackupService {
       }
       try {
         final kdf = env['kdf'] as Map<String, dynamic>;
-        final key = await _deriveKey(password,
-            base64Decode(kdf['salt'] as String), kdf['iterations'] as int);
+        final iterations = kdf['iterations'];
+        final salt = base64Decode(kdf['salt'] as String);
+        if (kdf['name'] != 'pbkdf2-hmac-sha256' ||
+            iterations is! int ||
+            iterations < 10000 ||
+            iterations > 2000000 ||
+            salt.length != 16) {
+          throw const FormatException('KDF metadata is invalid.');
+        }
+        final key = await _deriveKey(password, salt, iterations);
         final box = SecretBox.fromConcatenation(
             base64Decode(env['payload'] as String),
             nonceLength: 12,
@@ -137,9 +145,15 @@ class BackupService {
         env['created_at'] as String? ?? '', schema, encrypted, counts, json);
   }
 
-  static Future<File?> restore(BackupPreview preview) async {
+  static Future<File?> restore(
+    BackupPreview preview, {
+    required String snapshotPassword,
+  }) async {
     // Snapshot ya hali ya sasa kabla ya kubadilisha chochote.
-    final snapshot = await createBackupFile(prefix: 'kabla_ya_restore');
+    final snapshot = await createBackupFile(
+      prefix: 'kabla_ya_restore',
+      password: snapshotPassword,
+    );
     await DatabaseHelper.instance.restoreBackupJson(preview.json);
     return snapshot;
   }

@@ -1,24 +1,69 @@
-# Madini Track Tanzania (v11)
-Mfumo wa Flutter (offline-first, SQLite) + FastAPI/Supabase kwa usimamizi wa migodi.
-- `mobile/` programu ya Android • `backend/` seva • `docs/migrations/` migrations v8–v10 • `tools/` generator + majaribio ya SQLite.
-- Hali halisi: `docs/TESTING.md` (kilichojaribiwa na kisichojaribiwa) na `docs/PENDING.md`.
-- **Hii si bidhaa iliyothibitishwa kuwa market-ready.** Dart haijakompailiwa wala APK kujengwa bado.
-## Kujenga APK (Codespaces)
-`cd mobile && flutter pub get && flutter analyze && flutter test && flutter build apk --release`
-APK: `mobile/build/app/outputs/flutter-apk/app-release.apk`. Au push kwenye GitHub: workflow ya Actions inatoa APK kama artifact.
+# Madini Track Tanzania — v12.1 encryption setup
 
+Programu ya Flutter ya usimamizi wa shughuli za migodi, inayohifadhi rekodi
+kwenye kifaa kwanza na kusawazisha na API inapopatikana. Kiolesura cha simu
+kinatumia Kiswahili kama lugha ya msingi.
 
-## v9 preparation update
-Angalia `CHANGELOG-v9.md`, `docs/API.md`, `docs/DEPLOYMENT.md` na `docs/PENDING.md`.
-Backend endpoints sasa zinajumuisha login/logout/refresh, push/pull, conflict review,
-user provisioning na readiness check. Ripoti za simu zina export PDF/CSV kama mafaili
-yanayoweza kushirikiwa. Haya bado yanahitaji Flutter build na Postgres staging tests;
-usiweke secrets kwenye mobile app au repository.
+## Muundo wa mradi
 
+- `mobile/` — programu ya Android, SQLite/SQLCipher, backup na usawazishaji.
+- `backend/` — API ya FastAPI na hifadhi ya PostgreSQL.
+- `docs/migrations/` — migrations za database ya simu hadi schema v12.
+- `tools/db_tests/` — majaribio ya SQLite kwa migrations, constraints na outbox.
 
-## v11 handoff
-- Angalia `CHANGELOG-v11.md` na `docs/CODESPACES_HANDOFF.md`.
-- PostgreSQL push idempotency na pull-stream ordering zimeimarishwa kwa transaction/advisory locks; bado zinahitaji staging PostgreSQL verification.
-- CI inakagua Dart formatting bila kurekebisha files yenyewe.
-- Schema ya simu v10 huongeza metadata ya PIN, actor/mine kwenye audit na mass-balance ledger ya movements kupitia migrations za nyongeza. PIN mpya hutumia PBKDF2-HMAC-SHA256 rounds 600,000 kwa default na huweza kusanidiwa kwa `MADINI_PIN_PBKDF2_ITERATIONS`; thibitisha kasi kwenye simu dhaifu kabla ya pilot.
-- Batch merge huweka vyanzo, uzito, movements, audit na Batch mpya ndani ya transaction moja; historia ya kila chanzo inaonekana kwenye traceability.
+Toleo la app na toleo la schema ni vitu tofauti. App kwa sasa ni `2.2.0+6`;
+schema ya SQLite ni v12, ikiongeza Batch UUID relationships bila kuondoa
+human-readable IDs za kihistoria. Usibadilishe schema version bila migration
+salama.
+
+## Kuendesha na kupima
+
+```sh
+cd mobile
+flutter pub get
+dart format --output=none --set-exit-if-changed lib test
+flutter analyze
+flutter test
+flutter build apk --debug
+```
+
+Majaribio ya backend na SQLite:
+
+```sh
+python3 -m pip install -r backend/requirements-dev.txt
+PYTHONPATH=backend pytest -q
+python3 -m compileall -q backend tools/db_tests
+```
+
+Majaribio ya PostgreSQL yanahitaji `TEST_DATABASE_URL` ya database ya majaribio
+ya loopback yenye jina linaloishia au lenye `test`; bila hiyo integration tests
+zinarukwa kwa makusudi. Usitumie URL/credentials za production. Kuanzisha
+backend ya ndani na hatua za production: [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+API contract: [`docs/API.md`](docs/API.md).
+
+Hali na mipaka ya uthibitisho imeandikwa katika
+[`docs/TEST_STATUS.md`](docs/TEST_STATUS.md), [`docs/PENDING.md`](docs/PENDING.md)
+na [`docs/MARKET_READINESS_CHECKLIST.md`](docs/MARKET_READINESS_CHECKLIST.md).
+
+## Usimbaji na usalama
+
+Njia ya database ya Android hutumia `sqflite_sqlcipher`; ufunguo wa database
+huhifadhiwa kupitia `flutter_secure_storage`. Database ya zamani isiyosimbwa
+inahitajika kuhamishwa kwa SQLCipher kabla ya kufunguliwa. Tazama
+[`docs/DB_ENCRYPTION.md`](docs/DB_ENCRYPTION.md) kwa maelezo na hatua za
+uthibitishaji. Jaribio la FFI hutumia SQLite isiyosimbwa na **halithibitishi**
+usimbaji kwenye Android halisi.
+
+Usiweke `DATABASE_URL`, `JWT_SECRET`, ufunguo wa huduma wa Supabase, au
+keystore kwenye Git. Usiweke data halisi ya mgodi kabla ya majaribio ya
+urejeshaji, uthibitishaji wa PostgreSQL na ukaguzi wa kifaa.
+
+## APK ya kutolewa
+
+APK ya debug ni ya majaribio. Build ya release inahitaji keystore halali na
+`mobile/android/key.properties`; build itashindwa badala ya kutumia debug key
+kimyakimya. Maelekezo yako katika [`docs/RELEASE.md`](docs/RELEASE.md).
+
+**Mradi haujathibitishwa kuwa tayari kibiashara.** Majaribio ya kifaa halisi,
+PostgreSQL/Supabase, usawazishaji wa vifaa vingi, majaribio ya mgodi na ukaguzi
+wa kisheria bado yanahitajika.

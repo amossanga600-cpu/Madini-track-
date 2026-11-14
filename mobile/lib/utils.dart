@@ -58,12 +58,6 @@ double dbl(dynamic v) {
   return double.tryParse(v.toString()) ?? 0;
 }
 
-int intv(dynamic v) {
-  if (v == null) return 0;
-  if (v is num) return v.toInt();
-  return int.tryParse(v.toString()) ?? 0;
-}
-
 double? parseNum(String? s) {
   if (s == null) return null;
   final t = s.trim().replaceAll(',', '');
@@ -435,7 +429,7 @@ class VoidedStyle {
 // ---------------------------------------------------------------------------
 // Fomu ya jumla inayojengwa kutoka kwenye orodha ya fields
 // ---------------------------------------------------------------------------
-enum FType { text, integer, decimal, dropdown, date, multiline }
+enum FType { text, password, integer, decimal, dropdown, date, multiline }
 
 class Opt {
   final String value;
@@ -673,6 +667,20 @@ class _SpecFormState extends State<SpecForm> {
           ),
           validator: (v) => _validate(f, v),
         );
+
+      case FType.password:
+        return TextFormField(
+          controller: _c[f.key],
+          obscureText: true,
+          enableSuggestions: false,
+          autocorrect: false,
+          decoration: InputDecoration(
+            labelText: label,
+            hintText: f.hint,
+            border: const OutlineInputBorder(),
+          ),
+          validator: (v) => _validate(f, v),
+        );
     }
   }
 
@@ -773,4 +781,10 @@ Future<bool> showSpecSheet(
     ),
   );
   return r ?? false;
+}
+
+int intv(dynamic v) {
+  if (v == null) return 0;
+  if (v is num) return v.toInt();
+  return int.tryParse(v.toString()) ?? 0;
 }

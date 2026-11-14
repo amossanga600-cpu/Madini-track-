@@ -9,6 +9,13 @@ import 'local_auth.dart';
 import 'sync_service.dart';
 import 'utils.dart';
 
+const List<Opt> _kYesNo = [Opt('0', 'Hapana'), Opt('1', 'Ndiyo')];
+const List<Opt> _kYesNoUnknown = [
+  Opt('u', 'Haijulikani'),
+  Opt('1', 'Ndiyo'),
+  Opt('0', 'Hapana'),
+];
+
 // ===========================================================================
 // USALAMA (Safety)
 // ===========================================================================
@@ -39,9 +46,11 @@ class _SafetyPageState extends State<SafetyPage> {
   }
 
   Future<void> _add() async {
+    String? createdUuid;
     final ok = await showSpecSheet(
       context,
       title: 'Ripoti Tukio la Usalama',
+      note: 'Baada ya kuhifadhi utaombwa kupiga picha za eneo/tukio.',
       fields: [
         FSpec('type', 'Aina',
             type: FType.dropdown, options: optsOf(kSafetyTypes)),
@@ -49,25 +58,71 @@ class _SafetyPageState extends State<SafetyPage> {
             type: FType.dropdown, options: optsOf(kSafetySeverities)),
         const FSpec('date', 'Tarehe', type: FType.date),
         const FSpec('location', 'Eneo / shaft', required: false),
-        const FSpec('desc', 'Kilichotokea', type: FType.multiline),
+        FSpec('category', 'Kundi la tukio',
+            type: FType.dropdown,
+            options: optsOf(kIncidentCategories),
+            initial: 'Nyingine'),
+        FSpec('class', 'Kiwango cha jeraha',
+            type: FType.dropdown,
+            options: optsOf(kInjuryClasses),
+            initial: 'Hakuna'),
         const FSpec('injured', 'Idadi ya majeruhi',
             type: FType.integer, required: false, initial: '0'),
+        const FSpec('injured_name', 'Jina la aliyejeruhiwa', required: false),
+        const FSpec('body_part', 'Sehemu ya mwili iliyoathirika',
+            required: false),
+        const FSpec('lost_days', 'Siku za kupoteza kazi',
+            type: FType.integer, required: false, initial: '0'),
+        const FSpec('ppe', 'PPE ilivaliwa?',
+            type: FType.dropdown, options: _kYesNoUnknown, initial: 'u'),
+        const FSpec('equipment', 'Kifaa/mashine husika', required: false),
+        const FSpec('witnesses', 'Mashahidi', required: false),
+        const FSpec('desc', 'Kilichotokea', type: FType.multiline),
+        FSpec('cause', 'Chanzo (root cause)',
+            type: FType.dropdown,
+            options: optsOf(kRootCauses),
+            initial: 'Haijulikani bado'),
         const FSpec('action', 'Hatua zilizochukuliwa',
             type: FType.multiline, required: false),
+        const FSpec('stopped', 'Kazi imesimamishwa eneo hilo?',
+            type: FType.dropdown, options: _kYesNo, initial: '0'),
+        const FSpec('reported', 'Limeripotiwa kwa mamlaka?',
+            type: FType.dropdown, options: _kYesNo, initial: '0'),
+        const FSpec('authority_ref', 'Namba ya rejea ya ripoti',
+            required: false),
         const FSpec('officer', 'Afisa anayehusika', required: false),
       ],
-      onSubmit: (v) => DatabaseHelper.instance.addSafetyIncident(
-        type: v['type']!,
-        severity: v['severity']!,
-        occurredAt: v['date']!,
-        location: v['location'],
-        description: v['desc']!,
-        injured: parseNum(v['injured'])?.round() ?? 0,
-        actionTaken: v['action'],
-        officer: v['officer'],
-      ),
+      onSubmit: (v) async {
+        createdUuid = await DatabaseHelper.instance.addSafetyIncident(
+          type: v['type']!,
+          severity: v['severity']!,
+          occurredAt: v['date']!,
+          location: v['location'],
+          description: v['desc']!,
+          injured: parseNum(v['injured'])?.round() ?? 0,
+          actionTaken: v['action'],
+          officer: v['officer'],
+          category: v['category'],
+          rootCause: v['cause'],
+          injuryClass: v['class'],
+          injuredName: v['injured_name'],
+          bodyPart: v['body_part'],
+          lostWorkDays: parseNum(v['lost_days'])?.round() ?? 0,
+          witnesses: v['witnesses'],
+          equipment: v['equipment'],
+          ppeWorn: v['ppe'] == '1' ? true : (v['ppe'] == '0' ? false : null),
+          workStopped: v['stopped'] == '1',
+          reportedToAuthority: v['reported'] == '1',
+          authorityReference: v['authority_ref'],
+        );
+      },
     );
-    if (ok) await _load();
+    if (!ok) return;
+    await _load();
+    final uuid = createdUuid;
+    if (uuid != null && mounted) {
+      await showAttachSheet(context, 'safety_incidents', uuid);
+    }
   }
 
   Future<void> _followUp(Map<String, dynamic> r) async {
@@ -79,10 +134,36 @@ class _SafetyPageState extends State<SafetyPage> {
             type: FType.dropdown,
             options: optsOf(kFollowUp),
             initial: r['follow_up_status'] as String?),
+        FSpec('cause', 'Chanzo (root cause)',
+            type: FType.dropdown,
+            options: optsOf(kRootCauses),
+            initial: (r['root_cause'] ?? 'Haijulikani bado') as String),
+        FSpec('corrective', 'Hatua ya kurekebisha',
+            type: FType.multiline,
+            required: false,
+            initial: r['corrective_action'] as String?),
+        FSpec('due', 'Tarehe ya kukamilisha',
+            type: FType.date,
+            required: false,
+            initial: r['corrective_due'] as String?),
+        FSpec('reported', 'Limeripotiwa kwa mamlaka?',
+            type: FType.dropdown,
+            options: _kYesNo,
+            initial: intv(r['reported_to_authority']) == 1 ? '1' : '0'),
+        FSpec('authority_ref', 'Namba ya rejea ya ripoti',
+            required: false, initial: r['authority_reference'] as String?),
         const FSpec('note', 'Maelezo', required: false),
       ],
-      onSubmit: (v) => DatabaseHelper.instance
-          .updateSafetyFollowUp(r['uuid'] as String, v['status']!, v['note']),
+      onSubmit: (v) => DatabaseHelper.instance.updateSafetyFollowUp(
+        r['uuid'] as String,
+        v['status']!,
+        v['note'],
+        rootCause: v['cause'],
+        correctiveAction: v['corrective'],
+        correctiveDue: v['due'],
+        reportedToAuthority: v['reported'] == '1',
+        authorityReference: v['authority_ref'],
+      ),
     );
     if (ok) await _load();
   }
@@ -97,6 +178,36 @@ class _SafetyPageState extends State<SafetyPage> {
     } catch (e) {
       if (mounted) snack(context, errText(e));
     }
+  }
+
+  List<Widget> _extra(Map<String, dynamic> r) {
+    String s(String k) => (r[k] ?? '').toString();
+    final severe = r['severity'] == 'Kubwa' || r['severity'] == 'Kifo';
+    return [
+      if (s('incident_category').isNotEmpty)
+        KV('Kundi', s('incident_category')),
+      if (s('injury_class').isNotEmpty && s('injury_class') != 'Hakuna')
+        KV('Kiwango cha jeraha', s('injury_class')),
+      if (s('injured_name').isNotEmpty) KV('Aliyejeruhiwa', s('injured_name')),
+      if (s('body_part').isNotEmpty) KV('Sehemu ya mwili', s('body_part')),
+      if (intv(r['lost_work_days']) > 0)
+        KV('Siku zilizopotea', '${r['lost_work_days']}'),
+      if (r['ppe_worn'] != null)
+        KV('PPE', intv(r['ppe_worn']) == 1 ? 'Ilivaliwa' : 'Haikuvaliwa'),
+      if (s('equipment_involved').isNotEmpty)
+        KV('Kifaa', s('equipment_involved')),
+      if (s('witnesses').isNotEmpty) KV('Mashahidi', s('witnesses')),
+      if (s('root_cause').isNotEmpty) KV('Chanzo', s('root_cause')),
+      if (s('corrective_action').isNotEmpty)
+        KV('Hatua ya kurekebisha', s('corrective_action')),
+      if (intv(r['reported_to_authority']) == 1)
+        KV('Ripoti kwa mamlaka', s('authority_reference')),
+      if (s('closed_by').isNotEmpty)
+        KV('Imefungwa na', '${s('closed_by')} • ${shortDate(s('closed_at'))}'),
+      if (severe && intv(r['reported_to_authority']) != 1)
+        const Text('⚠ Haijaripotiwa kwa mamlaka',
+            style: TextStyle(color: Colors.red)),
+    ];
   }
 
   @override
@@ -145,6 +256,7 @@ class _SafetyPageState extends State<SafetyPage> {
                                 .isNotEmpty)
                               KV('Afisa', '${r['responsible_officer']}'),
                             KV('Aliyeripoti', '${r['reported_by']}'),
+                            ..._extra(r),
                             Wrap(spacing: 4, children: [
                               TextButton.icon(
                                 onPressed: () => _followUp(r),
@@ -450,7 +562,11 @@ class _SyncPageState extends State<SyncPage> {
                 trailing: _hasToken
                     ? TextButton(
                         onPressed: () async {
-                          await SyncService.logout();
+                          try {
+                            await SyncService.logout();
+                          } catch (e) {
+                            if (context.mounted) snack(context, errText(e));
+                          }
                           await _load();
                         },
                         child: const Text('Toka'))

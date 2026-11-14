@@ -1,0 +1,61 @@
+services:
+  migrate:
+    build:
+      context: .
+    env_file:
+      - .env.production
+    environment:
+      APP_ENV: production
+      DATABASE_URL: ${MIGRATION_DATABASE_URL:?Set MIGRATION_DATABASE_URL for schema migrations}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET through the deployment secret manager}
+    command: ["python", "-m", "app.migrate_cli"]
+    restart: "no"
+
+  api:
+    build:
+      context: .
+    environment:
+      APP_ENV: production
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to a managed PostgreSQL URL with sslmode=require}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET through the deployment secret manager}
+      API_PUBLIC_URL: ${API_PUBLIC_URL:?Set API_PUBLIC_URL to the public HTTPS URL}
+      AUTO_MIGRATE: "false"
+      TOKEN_TTL_SECONDS: ${TOKEN_TTL_SECONDS:-3600}
+      LOGIN_MAX_ATTEMPTS: ${LOGIN_MAX_ATTEMPTS:-5}
+      LOGIN_WINDOW_SECONDS: ${LOGIN_WINDOW_SECONDS:-300}
+      DB_POOL_MIN_SIZE: ${DB_POOL_MIN_SIZE:-2}
+      DB_POOL_MAX_SIZE: ${DB_POOL_MAX_SIZE:-10}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  proxy:
+    image: caddy:2-alpine
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?Set API_DOMAIN to a DNS name pointing at this host}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

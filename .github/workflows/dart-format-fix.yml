@@ -1,0 +1,23 @@
+name: Dart Format Fix
+# Endesha mwenyewe (Actions > Dart Format Fix > Run workflow) kama CI inalalamika
+# kuhusu formatting. Haibadilishi kanuni za CI; inarekebisha mpangilio na ku-commit.
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable }
+      - name: Format
+        working-directory: mobile
+        run: dart format lib test
+      - name: Commit
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A mobile
+          git diff --cached --quiet || (git commit -m "Format Dart code" && git push)

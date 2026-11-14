@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'package:sqflite/sqflite.dart';
+import 'package:sqflite_sqlcipher/sqflite.dart';
 import 'app_context.dart';
 import 'database_helper.dart';
 import 'db_modules.dart';
@@ -14,10 +14,10 @@ extension ReportsDb on DatabaseHelper {
       'SELECT b.batch_id, b.status, b.current_location, b.initial_weight_kg, '
       'b.weight_kg, '
       'IFNULL((SELECT SUM(p.ore_processed_kg) FROM processing_records p '
-      'WHERE p.company_id = b.company_id AND p.batch_id = b.batch_id '
+      'WHERE p.company_id = b.company_id AND p.batch_uuid = b.uuid '
       'AND p.voided = 0), 0) AS processed, '
       'IFNULL((SELECT SUM(c.initial_weight_kg) FROM ore_batches c '
-      'WHERE c.company_id = b.company_id AND c.parent_batch_id = b.batch_id), 0) '
+      'WHERE c.company_id = b.company_id AND c.parent_batch_uuid = b.uuid), 0) '
       'AS split_out '
       "FROM ore_batches b WHERE ${scopeWhere(allMines, 'b')} "
       "AND b.status != 'Imefutwa' ORDER BY b.id DESC",

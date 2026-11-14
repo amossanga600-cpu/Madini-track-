@@ -1,22 +1,54 @@
-# Ripoti ya majaribio (v11) — uaminifu kwanza
+# Mwongozo wa majaribio
 
-## Yaliyoendeshwa HAPA
-| Test | Command | Matokeo |
-|---|---|---|
-| Migration v7→v10, Batch reuse, merge mass-balance ledger, outbox, FK triggers, constraints, views, pull-flag, traceability, madeni, local_users, approval (47) | `python3 -m unittest discover -s tools/db_tests` | 47 zimepita |
-| Backend core: idempotency, tenant isolation (jina/uuid), RBAC, conflict, pull cursor yenye masahihisho, validation, rate limit, JWT secret validation (16) | `python3 -m unittest discover -s backend/tests` | 16 zimepita |
-| PIN algorithm/audit metadata v8→v9 huhifadhi hash/salt/iterations; v10 mass-balance view | Jaribio la SQLite kwenye `tools/db_tests/test_v10.py` | Limepita |
+## Flutter
 
-## HAIJAENDESHWA (hakuna Flutter/Dart/Postgres/Android kwenye mazingira ya ujenzi)
-- `flutter analyze`, `dart format`, `flutter test` — `mobile/test/` imeandikwa lakini **haijaendeshwa** hapa.
-- **Code yote ya Dart haijakompailiwa** (schema v10 na mobile v11): makosa ya compile yanawezekana. Endesha CI/Codespaces kwanza.
-- APK/AAB, usakinishaji, performance, UAT.
-- FastAPI app, PostgresRepo, schema.sql dhidi ya Postgres; Argon2/JWT.
-- Migration v5/v6→v7 (hakuna fixtures halisi). Fixture ya v7 ni **synthetic**, imetoka SQL ya `database_helper.dart`.
-- Pull/sync mwisho-hadi-mwisho kati ya app na seva halisi.
-- PIN KDF performance kwenye simu dhaifu ya Android haijapimwa. Default ni 600,000 iterations; jaribu UX na muda wa login kabla ya kuchagua config ya pilot.
+```sh
+cd mobile
+flutter pub get
+dart format --output=none --set-exit-if-changed lib test
+flutter analyze
+flutter test
+flutter build apk --debug
+```
 
-## Mkakati wa PIN
-Default ya production ni `MADINI_PIN_PBKDF2_ITERATIONS=600000`. Ikiwa benchmark kwenye simu halisi inaonyesha kuchelewa kusikokubalika, build inaweza kuweka thamani iliyo wazi kati ya 100,000 na 1,000,000, kwa mfano:
-`flutter test --dart-define=MADINI_PIN_PBKDF2_ITERATIONS=200000`
-Hii ni mfano wa kusanidi majaribio tu, si pendekezo la kupunguza thamani bila threat-model na kipimo kwenye vifaa lengwa. KDF inaendeshwa kwenye isolate; muda wa login bado hutegemea uwezo wa kifaa.
+`sqflite_common_ffi` huendesha majaribio ya SQLite bila Android. Hii
+haithibitishi SQLCipher native engine. Usibadilishe test assertions ili
+kuficha hitilafu. Release build inahitaji keystore iliyowekwa; haipaswi kutumia
+debug signing.
+
+## Python/SQLite/backend
+
+Kutoka repository root:
+
+```sh
+python3 -m unittest discover -s tools/db_tests
+python3 -m unittest discover -s backend/tests
+python3 -m compileall -q backend tools/db_tests
+git diff --check
+```
+
+SQLite tests hutumia fixtures za synthetic zinazotokana na schema ya repo;
+haziwakilishi database zote za zamani za wateja. Backend unit tests hutumia
+repo/test doubles pale ilivyoandikwa na **hazithibitishi PostgreSQL halisi**.
+
+## Staging inayohitajika
+
+Tumia PostgreSQL/Supabase tofauti na production. Endesha schema, tests za
+auth/RBAC/tenant isolation, simultaneous push, retry/idempotency, pull cursor,
+conflict resolution, deletion/void propagation na restore. Rekodi matokeo na
+toleo la schema. Usitumie secrets za staging kwenye terminal transcript au
+Git.
+
+## Kifaa cha Android kinachohitajika
+
+Kwenye simu halisi thibitisha:
+
+1. SQLCipher clean install na header/faili isiyosomeka kama SQLite wazi.
+2. Upgrade ya database iliyopo, interruption/restart na uhifadhi wa rekodi.
+3. Missing-key fail-closed na restore kutoka `.mtbackup`.
+4. Offline create → force-close → reopen → online push/pull.
+5. Batch ID zinazofanana kwa mfululizo kwenye vifaa viwili na UUID tofauti.
+6. KDF latency, startup, long lists, kamera, backup/restore na navigation.
+
+Andika kila kipimo kama PASS/FAIL/NOT RUN. Usihitimishe kuwa encryption,
+PostgreSQL au multi-device sync imethibitishwa kwa sababu ya unit tests pekee.

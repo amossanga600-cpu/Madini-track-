@@ -56,8 +56,16 @@ class PullApplyTest(unittest.TestCase):
 class TraceTest(unittest.TestCase):
     def setUp(self):
         self.db, self.ids = fresh(self)
+        for version in ('v9', 'v10', 'v11', 'v12'):
+            self.db.executescript(
+                (ROOT / f'docs/migrations/{version}_up.sql').read_text()
+            )
 
     def q(self, name, *a):
+        if name == 'movements':
+            a = (a[0], a[0], a[0])
+        elif name == 'sale_sources':
+            a = (a[0], 'Kampuni A', 'Mgodi 1')
         return self.db.execute(Q['trace'][name], a).fetchall()
 
     def test_batch_to_sale_chain(self):
@@ -83,10 +91,10 @@ class TraceTest(unittest.TestCase):
     def test_trace_works_after_batch_id_reuse(self):
         # B-02 imebatilishwa na kuhifadhiwa; ID mpya B-02 haichanganyi historia
         pu, bu = uid(), uid()
-        self.db.execute("INSERT INTO production_records(uuid,created_at,company_id,mine_id,shaft_area,batch_id,shift_date,shift_type,bags_count,weight_kg,recorded_by,voided) VALUES(?,?,?,?,?,?,?,?,?,?,?,0)",
-                        (pu, 'n', 'Kampuni A', 'Mgodi 1', 'S2', 'B-02', '2026-02-01', 'Mchana', 1, 10, 'a'))
         self.db.execute("INSERT INTO ore_batches(uuid,created_at,company_id,mine_id,batch_id,source_location,current_location,weight_kg,status,weight_initial_kg,source_production_uuid) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                         (bu, 'n', 'Kampuni A', 'Mgodi 1', 'B-02', 'S2', 'S2', 10, 'Imechimbwa', 10, pu))
+        self.db.execute("INSERT INTO production_records(uuid,created_at,company_id,mine_id,shaft_area,batch_id,shift_date,shift_type,bags_count,weight_kg,recorded_by,batch_uuid,voided) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,0)",
+                        (pu, 'n', 'Kampuni A', 'Mgodi 1', 'S2', 'B-02', '2026-02-01', 'Mchana', 1, 10, 'a', bu))
         self.assertEqual(self.q('production', bu)[0][self._col('production_records', 'uuid')], pu)
         self.assertEqual(self.q('production', self.ids['b2'])[0][self._col('production_records', 'uuid')], self.ids['p2'])
 

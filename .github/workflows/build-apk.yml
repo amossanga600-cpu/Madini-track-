@@ -18,7 +18,7 @@ jobs:
       - name: Migration + SQLite tests (Python)
         run: python -m unittest discover -s tools/db_tests -v
       - name: Backend core tests
-        run: python -m unittest discover -s backend/tests -v
+        run: python -m pip install httpx2 -r backend/requirements.txt "psycopg[binary]" && python -m unittest discover -s backend/tests -v
 
   mobile:
     runs-on: ubuntu-latest
@@ -44,10 +44,10 @@ jobs:
         run: flutter test
       - name: Build APK
         working-directory: mobile
-        run: flutter build apk --release
+        run: flutter build apk --debug
       - name: Build AAB
         working-directory: mobile
-        run: flutter build appbundle --release
+        run: echo "AAB inahitaji signing, imeruka CI"
       - uses: actions/upload-artifact@v4
         with:
           name: Madini-Track-APK-AAB

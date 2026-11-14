@@ -1,48 +1,46 @@
-# Madini Track v11 — Codespaces handoff
+# Madini Track v12 — handoff ya Codespaces
 
-Fanya kazi kwenye `Madini-Track-v11/`; SQLite schema ya sasa ni v10. Hifadhi nakala ya database halisi kabla ya kujaribu migration. Flutter/Dart, Postgres staging, na kifaa halisi lazima vithibitishwe kabla ya pilot.
+Schema ya simu ni v12. Migrations za v11→v12 zinaunganisha uzalishaji,
+movements, processing, gold lots na allocations kwa UUID bila kufuta Batch ID
+za kihistoria. Jaribu migration ya database halisi kwenye nakala salama pekee;
+usitumie staging au production data bila idhini.
 
-## 1. Flutter
+## Flutter na Android
+
 ```bash
-cd Madini-Track-v11/mobile
+cd mobile
 flutter --version
 flutter pub get
 dart format --output=none --set-exit-if-changed lib test
 flutter analyze
 flutter test
-flutter build apk --release
+flutter build apk --debug
 ```
 
-Rekebisha compile/analyzer/test failures kabla ya kujaribu backend live.
+Release build inahitaji keystore na `android/key.properties`; fuata
+[`RELEASE.md`](RELEASE.md). Build ya Linux/FFI haithibitishi SQLCipher,
+Android Keystore au install ya kifaa. Angalia
+[`DB_ENCRYPTION.md`](DB_ENCRYPTION.md) na [`TEST_STATUS.md`](TEST_STATUS.md).
 
-## 2. APK ya majaribio
+## Python na backend
+
 ```bash
-flutter build apk --release
-```
-APK: `mobile/build/app/outputs/flutter-apk/app-release.apk`. Bila release keystore, signing inaweza kuwa debug key na APK si ya Play Store.
-
-## 3. Python/backend
-```bash
-cd Madini-Track-v11
-python -m venv .venv
-source .venv/bin/activate
-pip install -r backend/requirements.txt
-python -m unittest discover -s backend/tests -v
-python -m unittest discover -s tools/db_tests -v
+python3 -m pip install -r backend/requirements-dev.txt
+PYTHONPATH=backend python3 -m pytest -q
+python3 -m pytest tools/db_tests -q
+python3 -m compileall -q backend tools/db_tests
 ```
 
-## 4. PostgreSQL/Supabase staging
-```bash
-cd Madini-Track-v11
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f backend/schema.sql
-cd backend
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
-- Tumia project ya staging, si production.
-- Weka `DATABASE_URL` na `JWT_SECRET` kama Codespaces Secrets/environment; usiziweke kwenye ZIP, Git, Flutter au screenshots.
-- `JWT_SECRET` iwe random na ya siri (angalau 32 bytes).
-- Hakiki `/health/ready`, login, push duplicate, conflict, pull pagination na resolve conflict.
-- Jaribu concurrency ya duplicate idempotency key na pull cursor kwa Postgres halisi.
+PostgreSQL integration tests zinahitaji `TEST_DATABASE_URL` ya database ya
+majaribio ya loopback yenye jina lenye `test`; usitumie production credentials.
+Docker Compose ya maendeleo na maelekezo ya production yako
+[`DEPLOYMENT.md`](DEPLOYMENT.md). Weka `DATABASE_URL`, `JWT_SECRET` na
+migration credentials kwenye secret manager; usiziweke kwenye Git, mobile app
+au screenshots.
 
-## 5. Kabla ya pilot
-Jaribu upgrade kwenye nakala za database halisi v5/v6/v7/v8/v9; hakiki backup/restore; fanya majaribio ya simu mbili na offline, hasa merge/mass-balance; pima muda wa PIN KDF kwenye simu dhaifu; fanya security review na UAT mgodini.
+## Kabla ya pilot
+
+Thibitisha migration kwenye nakala ya database halisi; jaribu SQLCipher,
+WAL/recovery, backup restore, APK install, vifaa viwili na push/pull dhidi ya
+staging PostgreSQL/HTTPS. Pima PIN KDF kwenye simu dhaifu, fanya security,
+privacy/legal review, UAT mgodini, na pata idhini ya mmiliki.

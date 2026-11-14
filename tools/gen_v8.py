@@ -304,14 +304,14 @@ ARCHIVE = [
 
 TRACE = {
   'batch': "SELECT * FROM ore_batches WHERE uuid = ?",
-  'production': "SELECT p.* FROM production_records p JOIN ore_batches b ON b.source_production_uuid = p.uuid WHERE b.uuid = ?",
+  'production': "SELECT * FROM production_records WHERE batch_uuid = ?",
   'children': "SELECT * FROM ore_batches WHERE parent_batch_uuid = ? ORDER BY id",
-  'merged_sources': "SELECT b.*, m.weight_kg AS merged_weight_kg FROM batch_movements m JOIN ore_batches target ON target.company_id = m.company_id AND target.batch_id = m.child_batch_id JOIN ore_batches b ON b.company_id = m.company_id AND b.batch_id = m.batch_id WHERE target.uuid = ? AND b.status = 'Imeunganishwa' AND m.notes LIKE 'Imeunganishwa kuwa Batch %' ORDER BY m.id",
-  'movements': "SELECT m.* FROM batch_movements m JOIN ore_batches b ON b.company_id = m.company_id AND b.batch_id = m.batch_id WHERE b.uuid = ? ORDER BY m.id",
-  'processing': "SELECT p.* FROM processing_records p JOIN ore_batches b ON b.company_id = p.company_id AND b.batch_id = p.batch_id WHERE b.uuid = ? AND p.voided = 0 ORDER BY p.id",
-  'lots': "SELECT g.* FROM gold_inventory g JOIN processing_records p ON p.uuid = g.processing_uuid JOIN ore_batches b ON b.company_id = p.company_id AND b.batch_id = p.batch_id WHERE b.uuid = ? AND p.voided = 0 ORDER BY g.id",
-  'sales': "SELECT s.uuid AS sale_uuid, s.sale_date, s.buyer, s.reference, a.grams, a.lot_uuid FROM gold_sale_allocations a JOIN sales s ON s.uuid = a.sale_uuid JOIN gold_inventory g ON g.uuid = a.lot_uuid JOIN processing_records p ON p.uuid = g.processing_uuid JOIN ore_batches b ON b.company_id = p.company_id AND b.batch_id = p.batch_id WHERE b.uuid = ? AND s.voided = 0 ORDER BY s.sale_date, s.id",
-  'sale_sources': "SELECT b.batch_id AS batch_id, b.uuid AS batch_uuid, p.uuid AS processing_uuid, g.uuid AS lot_uuid, a.grams AS grams FROM gold_sale_allocations a JOIN gold_inventory g ON g.uuid = a.lot_uuid JOIN processing_records p ON p.uuid = g.processing_uuid JOIN ore_batches b ON b.company_id = p.company_id AND b.batch_id = p.batch_id WHERE a.sale_uuid = ? ORDER BY a.id",
+  'merged_sources': "SELECT b.*, m.weight_kg AS merged_weight_kg FROM batch_movements m JOIN ore_batches target ON target.uuid = m.child_batch_uuid JOIN ore_batches b ON b.uuid = m.batch_uuid WHERE target.uuid = ? AND b.status = 'Imeunganishwa' ORDER BY m.id",
+  'movements': "SELECT m.* FROM batch_movements m WHERE m.batch_uuid = ? OR m.parent_batch_uuid = ? OR m.child_batch_uuid = ? ORDER BY m.id",
+  'processing': "SELECT p.* FROM processing_records p WHERE p.batch_uuid = ? AND p.voided = 0 ORDER BY p.id",
+  'lots': "SELECT g.* FROM gold_inventory g JOIN processing_records p ON p.uuid = g.processing_uuid WHERE g.batch_uuid = ? AND p.voided = 0 ORDER BY g.id",
+  'sales': "SELECT s.uuid AS sale_uuid, s.sale_date, s.buyer, s.reference, a.grams, a.lot_uuid FROM gold_sale_allocations a JOIN sales s ON s.uuid = a.sale_uuid WHERE a.batch_uuid = ? AND s.voided = 0 ORDER BY s.sale_date, s.id",
+  'sale_sources': "SELECT b.batch_id AS batch_id, b.uuid AS batch_uuid, p.uuid AS processing_uuid, g.uuid AS lot_uuid, a.grams AS grams FROM gold_sale_allocations a JOIN sales s ON s.uuid = a.sale_uuid JOIN gold_inventory g ON g.uuid = a.lot_uuid AND g.company_id = s.company_id AND g.mine_id = s.mine_id JOIN processing_records p ON p.uuid = g.processing_uuid AND p.company_id = s.company_id AND p.mine_id = s.mine_id JOIN ore_batches b ON b.uuid = a.batch_uuid AND b.company_id = s.company_id AND b.mine_id = s.mine_id WHERE a.sale_uuid = ? AND s.company_id = ? AND s.mine_id = ? ORDER BY a.id",
   'evidence': "SELECT * FROM attachments WHERE record_uuid = ? AND deleted_at IS NULL ORDER BY id",
 }
 DEBTS_DUE = ("SELECT d.*, IFNULL((SELECT SUM(p.amount) FROM debt_payments p WHERE p.debt_uuid = d.uuid), 0) AS paid "
@@ -327,9 +327,12 @@ ORPHANS = [
     ("allocation_sale", "SELECT COUNT(*) FROM gold_sale_allocations a WHERE NOT EXISTS (SELECT 1 FROM sales s WHERE s.uuid = a.sale_uuid)"),
     ("allocation_lot", "SELECT COUNT(*) FROM gold_sale_allocations a WHERE NOT EXISTS (SELECT 1 FROM gold_inventory g WHERE g.uuid = a.lot_uuid)"),
     ("lot_processing", "SELECT COUNT(*) FROM gold_inventory a WHERE NOT EXISTS (SELECT 1 FROM processing_records p WHERE p.uuid = a.processing_uuid)"),
-    ("batch_without_production", "SELECT COUNT(*) FROM ore_batches b WHERE b.parent_batch_id IS NULL AND NOT EXISTS (SELECT 1 FROM production_records p WHERE p.company_id = b.company_id AND (p.batch_id = b.batch_id OR p.uuid = b.source_production_uuid))"),
-    ("movement_without_batch", "SELECT COUNT(*) FROM batch_movements m WHERE NOT EXISTS (SELECT 1 FROM ore_batches b WHERE b.company_id = m.company_id AND b.batch_id = m.batch_id)"),
-    ("processing_without_batch", "SELECT COUNT(*) FROM processing_records p WHERE NOT EXISTS (SELECT 1 FROM ore_batches b WHERE b.company_id = p.company_id AND b.batch_id = p.batch_id)"),
+    ("batch_without_production", "SELECT COUNT(*) FROM ore_batches b WHERE b.parent_batch_uuid IS NULL AND b.source_production_uuid IS NULL AND NOT EXISTS (SELECT 1 FROM batch_movements m WHERE m.child_batch_uuid = b.uuid)"),
+    ("movement_without_batch", "SELECT COUNT(*) FROM batch_movements m WHERE m.batch_uuid IS NULL OR NOT EXISTS (SELECT 1 FROM ore_batches b WHERE b.company_id = m.company_id AND b.uuid = m.batch_uuid)"),
+    ("processing_without_batch", "SELECT COUNT(*) FROM processing_records p WHERE p.batch_uuid IS NULL OR NOT EXISTS (SELECT 1 FROM ore_batches b WHERE b.company_id = p.company_id AND b.uuid = p.batch_uuid)"),
+    ("production_without_batch", "SELECT COUNT(*) FROM production_records p WHERE p.batch_uuid IS NULL OR NOT EXISTS (SELECT 1 FROM ore_batches b WHERE b.company_id = p.company_id AND b.uuid = p.batch_uuid)"),
+    ("gold_without_batch", "SELECT COUNT(*) FROM gold_inventory g WHERE g.batch_uuid IS NULL OR NOT EXISTS (SELECT 1 FROM ore_batches b WHERE b.company_id = g.company_id AND b.uuid = g.batch_uuid)"),
+    ("allocation_without_batch", "SELECT COUNT(*) FROM gold_sale_allocations a WHERE a.batch_uuid IS NULL OR NOT EXISTS (SELECT 1 FROM ore_batches b WHERE b.uuid = a.batch_uuid)"),
 ]
 
 SEP = "\n-- @@\n"

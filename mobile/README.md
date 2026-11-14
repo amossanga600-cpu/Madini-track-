@@ -1,17 +1,19 @@
-# madini_tracker
+# Madini Track Tanzania — programu ya simu
 
-A new Flutter project.
+Programu ya Flutter ya offline-first. Taarifa huhifadhiwa kwenye database ya
+kifaa kabla ya kujaribu kusawazisha. Schema ya SQLite ni v11; encryption ya
+production hutumia SQLCipher, lakini lazima ithibitishwe kwenye Android halisi.
 
-## Getting Started
+Kutoka folda hii:
 
-This project is a starting point for a Flutter application.
+```sh
+flutter pub get
+dart format --output=none --set-exit-if-changed lib test
+flutter analyze
+flutter test
+flutter build apk --debug
+```
 
-A few resources to get you started if this is your first Flutter project:
-
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Tazama `../docs/DB_ENCRYPTION.md`, `../docs/BACKUP_RESTORE_SW.md`,
+`../docs/INSTALLATION_SW.md` na `../docs/TEST_STATUS.md`. APK ya debug si ya
+uzalishaji; release inahitaji keystore na `android/key.properties`.
