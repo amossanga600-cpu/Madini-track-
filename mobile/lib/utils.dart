@@ -55,7 +55,8 @@ String shortDate(dynamic v) {
 double dbl(dynamic v) {
   if (v == null) return 0;
   if (v is num) return v.toDouble();
-  return double.tryParse(v.toString()) ?? 0;}
+  return double.tryParse(v.toString()) ?? 0;
+}
 
 double? parseNum(String? s) {
   if (s == null) return null;

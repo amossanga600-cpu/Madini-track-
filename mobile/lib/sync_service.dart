@@ -133,9 +133,12 @@ class SyncService {
     final localHosts = {'localhost', '127.0.0.1', '::1', '10.0.2.2'};
     if (uri.scheme != 'https' &&
         !(uri.scheme == 'http' && localHosts.contains(uri.host))) {
-      throw AppError('Seva lazima itumie HTTPS; HTTP inaruhusiwa kwa majaribio ya kifaa cha ndani pekee.');
+      throw AppError(
+          'Seva lazima itumie HTTPS; HTTP inaruhusiwa kwa majaribio ya kifaa cha ndani pekee.');
     }
-    return uri.replace(path: uri.path.replaceAll(RegExp(r'/+$'), '')).toString();
+    return uri
+        .replace(path: uri.path.replaceAll(RegExp(r'/+$'), ''))
+        .toString();
   }
 
   static Future<void> saveServerUrl(String url) async {
@@ -206,12 +209,10 @@ class SyncService {
       final token = await tokenProvider();
       final url = await serverUrl();
       if (token != null && url != null) {
-        final response = await c
-            .post(
-              Uri.parse('$url/v1/auth/logout'),
-              headers: {'Authorization': 'Bearer $token'},
-            )
-            .timeout(const Duration(seconds: 20));
+        final response = await c.post(
+          Uri.parse('$url/v1/auth/logout'),
+          headers: {'Authorization': 'Bearer $token'},
+        ).timeout(const Duration(seconds: 20));
         if (response.statusCode != 200) {
           throw AppError(
               'Token imeondolewa kwenye kifaa, lakini seva haikuthibitisha kutoka.');
