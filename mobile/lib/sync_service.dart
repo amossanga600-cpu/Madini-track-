@@ -116,7 +116,9 @@ class SyncService {
 
   static Future<String?> serverUrl() async {
     final saved = await DatabaseHelper.instance.getSetting('sync_url');
-    return saved == null ? 'https://madini-track-staging.onrender.com' : normalizeServerUrl(saved);
+        return saved == null
+          ? 'https://madini-track-staging.onrender.com'
+        : normalizeServerUrl(saved);
   }
 
   static String normalizeServerUrl(String url) {
