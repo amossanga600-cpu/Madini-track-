@@ -51,7 +51,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: Madini-Track-APK-AAB
-          path: |
-            mobile/build/app/outputs/flutter-apk/app-release.apk
-            mobile/build/app/outputs/bundle/release/app-release.aab
+          path: mobile/build/app/outputs/flutter-apk/app-debug.apk
           retention-days: 14
